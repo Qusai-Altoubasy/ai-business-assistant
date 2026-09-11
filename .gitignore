@@ -1,0 +1,21 @@
+# Maven and Quarkus build output
+target/
+.quarkus/
+*.class
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# IDE metadata
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.vscode/
+
+# Operating system files
+.DS_Store
