@@ -8,17 +8,17 @@ class ApiClient {
     _dio.options = _dio.options.copyWith(
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(minutes: 2),
-      responseType: ResponseType.plain,
+      responseType: ResponseType.json,
     );
   }
 
   final AppConfig config;
   final Dio _dio;
 
-  Future<Response<dynamic>> get(String path) async {
+  Future<Response<dynamic>> post(String path, {Object? data}) async {
     try {
       _dio.options.baseUrl = config.validatedBaseUri.toString();
-      return await _dio.get<dynamic>(path);
+      return await _dio.post<dynamic>(path, data: data);
     } on FormatException {
       throw const ApiException(
         ApiFailureType.malformed,

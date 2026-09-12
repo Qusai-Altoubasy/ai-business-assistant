@@ -5,14 +5,15 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('URL encodes the message as one endpoint path segment', () async {
+  test('posts the trimmed query and reads the JSON response', () async {
     final client = _RecordingApiClient();
     final dataSource = ChatRemoteDataSource(client);
 
     final response = await dataSource.sendMessage(' Hello AI / sales? ');
 
     expect(response, 'Backend response');
-    expect(client.lastPath, '/hello/ai/Hello%20AI%20%2F%20sales%3F');
+    expect(client.lastPath, '/api/chat');
+    expect(client.lastData, <String, String>{'query': 'Hello AI / sales?'});
   });
 }
 
@@ -21,12 +22,14 @@ class _RecordingApiClient extends ApiClient {
     : super(config: const AppConfig(apiBaseUrl: 'http://localhost:8080'));
 
   String? lastPath;
+  Object? lastData;
 
   @override
-  Future<Response<dynamic>> get(String path) async {
+  Future<Response<dynamic>> post(String path, {Object? data}) async {
     lastPath = path;
+    lastData = data;
     return Response<dynamic>(
-      data: 'Backend response',
+      data: <String, dynamic>{'response': 'Backend response'},
       requestOptions: RequestOptions(path: path),
     );
   }
