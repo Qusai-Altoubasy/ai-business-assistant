@@ -1,6 +1,6 @@
 # AI Business Assistant — Flutter frontend
 
-Desktop-first Flutter client for the backend's AI greeting endpoint. The
+Desktop-first Flutter client for the backend's AI chat endpoint. The
 current implementation is intentionally scoped to chat; the other navigation
 items represent planned capabilities.
 
@@ -8,7 +8,7 @@ items represent planned capabilities.
 
 - Flutter stable (the project was generated with Flutter 3.44 and Dart 3.12)
 - Chrome for Flutter Web, or the Linux desktop toolchain
-- The backend running and exposing `GET /hello/ai/{message}`
+- The backend running and exposing `POST /api/chat`
 
 ## Install
 
@@ -47,15 +47,17 @@ address reachable from that device instead of `localhost`.
 
 - Starts in a welcome state with four editable suggested prompts.
 - Enter sends a message; Shift+Enter inserts a newline.
-- Trims and URL-encodes messages before calling `GET /hello/ai/{message}`.
-- Renders successful plain-text responses as assistant messages.
+- Trims messages and sends them as JSON to `POST /api/chat`.
+- Reads the `response` field from successful JSON responses and renders it as
+  an assistant message.
 - Converts timeouts, network failures, unsuccessful responses, and empty
   responses into safe inline errors with Retry.
 - New Chat and Clear reset local state.
 - Recent conversations are sample content and are not persisted.
 
-The backend endpoint returns plain text. Calling it sends the message to Gemini
-and may incur API usage costs.
+The backend endpoint accepts `{"query":"..."}` and returns
+`{"response":"..."}`. Calling it sends the message to Gemini and may incur API
+usage costs.
 
 ## Architecture
 

@@ -15,9 +15,19 @@ class ChatRemoteDataSource {
       );
     }
 
-    final encodedMessage = Uri.encodeComponent(normalized);
-    final response = await _apiClient.get('/hello/ai/$encodedMessage');
-    final content = response.data?.toString().trim() ?? '';
+    final response = await _apiClient.post(
+      '/api/chat',
+      data: <String, String>{'query': normalized},
+    );
+    final data = response.data;
+    if (data is! Map<String, dynamic> || data['response'] is! String) {
+      throw const ApiException(
+        ApiFailureType.malformed,
+        'The AI service returned an unexpected response.',
+      );
+    }
+
+    final content = (data['response'] as String).trim();
     if (content.isEmpty) {
       throw const ApiException(
         ApiFailureType.emptyResponse,

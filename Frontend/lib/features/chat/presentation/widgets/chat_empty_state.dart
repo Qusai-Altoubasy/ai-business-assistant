@@ -58,7 +58,7 @@ class ChatEmptyState extends StatelessWidget {
               SizedBox(width: 8),
               Icon(Icons.circle, size: 4, color: AppColors.outlineSoft),
               SizedBox(width: 8),
-              Text('GET /hello/ai/{message}', style: AppTextStyles.mono),
+              Text('POST /api/chat', style: AppTextStyles.mono),
             ],
           ),
         ),
