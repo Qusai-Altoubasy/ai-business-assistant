@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: ../Backend
+      dockerfile: Dockerfile
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:8080"
+
+  frontend:
+    build:
+      context: ../Frontend
+      dockerfile: Dockerfile
+      args:
+        API_BASE_URL: ${API_BASE_URL}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:80"
