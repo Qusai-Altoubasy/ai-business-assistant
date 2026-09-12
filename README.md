@@ -66,7 +66,6 @@ Backend/
 ├── src/main/resources/application.properties
 ├── src/test/java/com/aibusinessassistant/chat/ChatResourceTest.java
 ├── .mvn/wrapper/
-├── .env.example
 ├── Dockerfile
 ├── mvnw
 ├── mvnw.cmd
@@ -90,8 +89,6 @@ quarkus.langchain4j.ai.gemini.chat-model.model-id=${GEMINI_MODEL}
 | `API_BASE_URL` | Backend URL compiled into Flutter via `--dart-define` | `http://localhost:8080` |
 
 The Gemini chat-model temperature is set directly to `0.1` in `Backend/src/main/resources/application.properties`; there is no project-defined `TEMPERATURE` environment variable. The test profile supplies non-secret Gemini placeholders.
-
-`Backend/.env.example` is a reference template for the required Gemini settings. Choose a model available to your API key. Supply real values through the backend's environment; no backend `.env` file is supplied. The Compose setup has its own template, described below.
 
 ## Running Locally
 
@@ -225,7 +222,7 @@ The existing Flutter tests cover chat state handling and the remote request/resp
 
 ## Security
 
-Never commit API keys. `.env` and `.env.*` files are ignored by Git, except for `.env.example` templates, which contain only placeholder or sample configuration. Keep secrets in backend environment configuration, never in Flutter build arguments or source code. The Docker Compose setup is intended for local/demo use.
+Never commit API keys. Keep real secrets in local environment files or backend environment configuration, never in Flutter build arguments or source code. The Docker Compose setup is intended for local/demo use.
 
 ## Roadmap — Planned
 
