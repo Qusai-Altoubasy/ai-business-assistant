@@ -7,6 +7,12 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      DB_USERNAME: ${POSTGRES_USER:-ai_business_assistant}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ai_business_assistant}
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${BACKEND_PORT}:8080"
 
@@ -18,3 +24,24 @@ services:
         API_BASE_URL: ${API_BASE_URL}
     ports:
       - "127.0.0.1:${FRONTEND_PORT}:80"
+
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_business_assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_business_assistant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ai-business-assistant-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  ai-business-assistant-postgres-data:
+    name: ai-business-assistant-postgres-data
