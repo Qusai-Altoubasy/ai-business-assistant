@@ -1,4 +1,4 @@
-package com.aibusinessassistant.product.dto;
+package com.aibusinessassistant.order.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
