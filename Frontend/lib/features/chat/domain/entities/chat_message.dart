@@ -1,4 +1,5 @@
 import 'assistant_message_metadata.dart';
+import 'business_analysis.dart';
 
 enum ChatRole { user, assistant, system }
 
@@ -13,6 +14,7 @@ class ChatMessage {
     this.status = MessageStatus.success,
     this.error,
     this.metadata,
+    this.analysis,
   });
 
   final String id;
@@ -22,4 +24,5 @@ class ChatMessage {
   final MessageStatus status;
   final String? error;
   final AssistantMessageMetadata? metadata;
+  final BusinessAnalysis? analysis;
 }

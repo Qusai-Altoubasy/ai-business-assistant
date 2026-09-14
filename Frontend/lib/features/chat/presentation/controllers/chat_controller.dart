@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/api_exception.dart';
+import '../../domain/entities/business_analysis.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/repositories/chat_repository.dart';
 import 'chat_state.dart';
@@ -42,7 +43,8 @@ class ChatController extends StateNotifier<ChatState> {
       final response = await _repository.sendMessage(prompt);
       _replaceAssistant(
         assistantId,
-        content: response,
+        content: response.summary,
+        analysis: response,
         status: MessageStatus.success,
       );
       state = state.copyWith(isSubmitting: false, clearLastFailedPrompt: true);
@@ -93,6 +95,7 @@ class ChatController extends StateNotifier<ChatState> {
     required String content,
     required MessageStatus status,
     String? error,
+    BusinessAnalysis? analysis,
   }) {
     state = state.copyWith(
       messages: [
@@ -106,6 +109,7 @@ class ChatController extends StateNotifier<ChatState> {
               status: status,
               error: error,
               metadata: item.metadata,
+              analysis: analysis,
             )
           else
             item,

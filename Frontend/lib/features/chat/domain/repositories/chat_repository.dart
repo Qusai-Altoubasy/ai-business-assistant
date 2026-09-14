@@ -1,3 +1,5 @@
+import '../entities/business_analysis.dart';
+
 abstract interface class ChatRepository {
-  Future<String> sendMessage(String message);
+  Future<BusinessAnalysis> sendMessage(String message);
 }

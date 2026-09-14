@@ -8,7 +8,7 @@ items represent planned capabilities.
 
 - Flutter stable (the project was generated with Flutter 3.44 and Dart 3.12)
 - Chrome for Flutter Web, or the Linux desktop toolchain
-- The backend running and exposing `POST /api/chat`
+- The backend running and exposing `POST /api/chat/business-analysis`
 
 ## Install
 
@@ -47,17 +47,19 @@ address reachable from that device instead of `localhost`.
 
 - Starts in a welcome state with four editable suggested prompts.
 - Enter sends a message; Shift+Enter inserts a newline.
-- Trims messages and sends them as JSON to `POST /api/chat`.
-- Reads the `response` field from successful JSON responses and renders it as
-  an assistant message.
-- Converts timeouts, network failures, unsuccessful responses, and empty
-  responses into safe inline errors with Retry.
+- Trims messages and sends them as JSON to `POST /api/chat/business-analysis`.
+- Renders structured `summary`, `insights`, and `recommendations` inside the
+  existing assistant message. Empty list sections are hidden.
+- Converts timeouts, network failures, unsuccessful responses, malformed
+  payloads, and empty summaries into safe inline errors with Retry.
 - New Chat and Clear reset local state.
 - Recent conversations are sample content and are not persisted.
 
 The backend endpoint accepts `{"query":"..."}` and returns
-`{"response":"..."}`. Calling it sends the message to Gemini and may incur API
-usage costs.
+`{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
+null lists become empty lists; blank list entries are omitted. Invalid field
+types and blank summaries produce safe inline errors with Retry. Calling it
+sends the message to Gemini and may incur API usage costs.
 
 ## Architecture
 
@@ -67,14 +69,17 @@ lib/
 ├── core/config/                 # dart-define configuration
 ├── core/network/                # Dio client and normalized failures
 └── features/chat/
-    ├── data/                    # remote source and repository implementation
+    ├── data/                    # response model, remote source, and repository
     ├── domain/                  # message entities and repository contract
     └── presentation/            # Riverpod controller, page, and widgets
 ```
 
-The message entity leaves room for optional sources, tools, latency, token
-usage, model information, and citations without coupling the UI to a future
-backend response contract.
+The remote source deserializes a typed response model; the repository maps it
+to a domain `BusinessAnalysis`. Riverpod stores it on the existing message
+entity, and the assistant widget renders its sections. Message `content` keeps
+the summary as a text fallback; lists remain structured. Existing optional
+metadata is separate and unused by this response. Backend tool execution details
+are not part of the frontend contract.
 
 ## Verification
 

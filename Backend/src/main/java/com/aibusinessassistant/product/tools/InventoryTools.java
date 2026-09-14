@@ -1,13 +1,16 @@
 package com.aibusinessassistant.product.tools;
 
+import com.aibusinessassistant.product.Product;
 import com.aibusinessassistant.product.ProductRepository;
 import com.aibusinessassistant.product.dto.LowStockProductDTO;
+import com.aibusinessassistant.product.dto.ProductStockDTO;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.Optional;
 
 @ApplicationScoped
 @RequiredArgsConstructor
@@ -42,5 +45,35 @@ public class InventoryTool {
             log.error("Tool failed: getLowStockProducts", exception);
             throw exception;
         }
+    }
+
+    @Tool("""
+        Returns the current stock information for a specific product by its ID.
+        Use this tool when the user asks about the current inventory level,
+        available quantity, or minimum stock level of a specific product.
+        """)
+    public ProductStockDTO getProductStock(Long productId) {
+        log.info("Tool called: getProductStock (productId={})", productId);
+
+        Product product = productRepository.findByIdOptional(productId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Product not found with id: " + productId
+                        )
+                );
+
+        ProductStockDTO result = new ProductStockDTO(
+                product.getId(),
+                product.getName(),
+                product.getStockQuantity(),
+                product.getMinimumStock()
+        );
+
+        log.info(
+                "Tool completed: getProductStock (productId={}, stockQuantity={})",
+                product.getId(),
+                product.getStockQuantity()
+        );
+        return result;
     }
 }
