@@ -84,7 +84,7 @@ Client JSON query
   → JSON response
 ```
 
-`ChatRequestDTO` contains only `query`. No conversation history is passed to either AI service. `BusinessAnalysisService` registers `InventoryTool`; Gemini decides whether to invoke its read-only low-stock query based on the request. The general chat service has no database tools.
+`ChatRequestDTO` contains only `query`. No conversation history is passed to either AI service. `BusinessAnalysisService` registers `InventoryTools`; Gemini decides whether to invoke its read-only low-stock query based on the request. The general chat service has no database tools.
 
 ## Database
 
