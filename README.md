@@ -13,7 +13,7 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 
 ## Current Learning Stage
 
-The current implementation demonstrates a chat API, declarative AI Services, prompting basics, structured output, temperature experimentation, and basic prompt-based handling of hallucinations and missing data.
+The current implementation demonstrates a chat API, declarative AI Services, prompting basics, structured output, temperature experimentation, a read-only database-backed LangChain4j tool, and basic prompt-based handling of hallucinations and missing data.
 
 The Flutter client sends individual queries to the chat endpoint, displays responses, and supports suggested prompts, inline errors with retry, and resetting the local chat. Messages live in client state; conversation history is not sent to the backend or persisted. Sidebar modules and recent conversations are placeholders. The business-analysis endpoint is currently available through an HTTP client, with no dedicated Flutter integration.
 
@@ -36,14 +36,14 @@ Quarkus REST API (ChatResource)
   ↓
 LangChain4j AI Service (ChatService / BusinessAnalysisService)
   ↓
-Google Gemini
+Google Gemini ↔ InventoryTool → ProductRepository → PostgreSQL
   ↓
 String / structured Java record → JSON response to the client
 ```
 
 The backend follows a **feature-based architecture**: the REST resource, AI interfaces, and DTOs belong to `chat`. Both `@RegisterAiService` interfaces live in `chat.ai`; request, response, and structured-output records live in `chat.dto`.
 
-There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. PostgreSQL persistence is ready for future Tool Calling exercises; the chat services do not access it yet. Tool Calling, Memory, and RAG remain planned additions.
+There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. `BusinessAnalysisService` exposes `InventoryTool` to Gemini so inventory questions can query current low-stock products through `ProductRepository`. Memory and RAG remain planned additions.
 
 ## Project Structure
 
@@ -64,7 +64,7 @@ Backend/
 │       ├── ChatRequestDTO.java
 │       ├── ChatResponseDTO.java
 │       └── BusinessAnalysisDTO.java
-├── src/main/java/com/aibusinessassistant/product/  # Product + ProductRepository
+├── src/main/java/com/aibusinessassistant/product/  # Product, repository, inventory DTO, and tool
 ├── src/main/java/com/aibusinessassistant/customer/ # Customer + CustomerRepository
 ├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem + repositories
 ├── src/main/resources/
@@ -202,25 +202,24 @@ Example response shape:
 
 ### `POST /api/chat/business-analysis`
 
-Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings.
+Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. For current inventory questions, Gemini can invoke the read-only `getLowStockProducts()` tool, which queries PostgreSQL and returns products whose stock is at or below their configured minimum.
 
 ```bash
 curl --request POST http://localhost:8080/api/chat/business-analysis \
   --header 'Content-Type: application/json' \
-  --data '{"query":"Our revenue increased by 20%, but profit decreased by 10%. Analyze the situation."}'
+  --data '{"query":"Do we have any products that need restocking?"}'
 ```
 
 Illustrative response:
 
 ```json
 {
-  "summary": "Revenue increased by 20%, while profit decreased by 10%.",
+  "summary": "Three products currently need restocking.",
   "insights": [
-    "The supplied figures do not establish why profit declined.",
-    "Higher costs are one possible explanation, not a confirmed fact."
+    "USB-C Cable has the largest gap between current and minimum stock."
   ],
   "recommendations": [
-    "Compare costs and margins for the same periods to investigate the change."
+    "Prioritize replenishing the products returned by the inventory tool."
   ]
 }
 ```
@@ -252,17 +251,16 @@ The existing Flutter tests cover chat state handling and the remote request/resp
 
 Never commit API keys. Keep real secrets in local environment files or backend environment configuration, never in Flutter build arguments or source code. The Docker Compose setup is intended for local/demo use.
 
-## Roadmap — Planned
+## Roadmap
 
-These capabilities are not implemented:
-
-1. Tool Calling and read-only business tools over the PostgreSQL seed data — the next learning stage
-2. Conversation Memory
-3. Embeddings and pgvector
-4. RAG
-5. Further reliability, security, and observability work
-6. AI response evaluation
-7. MCP and Agents concepts
+1. **Completed:** PostgreSQL persistence and the read-only `getLowStockProducts()` LangChain4j tool.
+2. Additional explicit business tools for sales, product stock, and customer statistics.
+3. Conversation Memory.
+4. Embeddings and pgvector.
+5. RAG.
+6. Further reliability, security, and observability work.
+7. AI response evaluation.
+8. MCP and Agents concepts.
 
 ## Owner
 

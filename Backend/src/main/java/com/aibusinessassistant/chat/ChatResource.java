@@ -12,11 +12,13 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Path("/api/chat")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 @RequiredArgsConstructor
+@Slf4j
 public class ChatResource {
 
     private final ChatService chatService;
@@ -24,12 +26,42 @@ public class ChatResource {
 
     @POST
     public ChatResponseDTO chat(ChatRequestDTO request) {
-        return new ChatResponseDTO(chatService.chat(request.query()));
+        String query = request.query();
+        log.info("AI request received: chat (queryLength={})", queryLength(query));
+        long startedAt = System.nanoTime();
+
+        try {
+            ChatResponseDTO response = new ChatResponseDTO(chatService.chat(query));
+            log.debug("AI request completed: chat (durationMs={})", elapsedMilliseconds(startedAt));
+            return response;
+        } catch (RuntimeException exception) {
+            log.error("AI request failed: chat (durationMs={})", elapsedMilliseconds(startedAt), exception);
+            throw exception;
+        }
     }
 
     @POST
     @Path("/business-analysis")
     public BusinessAnalysisDTO businessAnalysisChat(ChatRequestDTO request) {
-        return businessAnalysisService.analyze(request.query());
+        String query = request.query();
+        log.info("AI request received: business-analysis (queryLength={})", queryLength(query));
+        long startedAt = System.nanoTime();
+
+        try {
+            BusinessAnalysisDTO response = businessAnalysisService.chat(query);
+            log.info("AI request completed: business-analysis (durationMs={})", elapsedMilliseconds(startedAt));
+            return response;
+        } catch (RuntimeException exception) {
+            log.error("AI request failed: business-analysis (durationMs={})", elapsedMilliseconds(startedAt), exception);
+            throw exception;
+        }
+    }
+
+    private static Integer queryLength(String query) {
+        return query == null ? null : query.length();
+    }
+
+    private static long elapsedMilliseconds(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

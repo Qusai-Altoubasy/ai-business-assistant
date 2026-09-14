@@ -2,7 +2,7 @@
 
 The Quarkus backend for an educational AI Business Assistant. It currently exposes two Gemini-backed AI endpoints and a PostgreSQL persistence foundation for business data.
 
-The learning progression starts with prompting, structured output, and PostgreSQL, which are implemented. Tool Calling, Memory, Embeddings, pgvector, RAG, and production reliability/evaluation are future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
+The learning progression starts with prompting, structured output, PostgreSQL, and a read-only inventory tool, which are implemented. Additional Tool Calling, Memory, Embeddings, pgvector, RAG, and production reliability/evaluation are future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
 
 ## Tech Stack
 
@@ -20,8 +20,10 @@ Quarkus and LangChain4j dependencies use the BOMs in [pom.xml](pom.xml). The Pos
 - `POST /api/chat` returns free-form AI text in a JSON response.
 - `POST /api/chat/business-analysis` returns a structured business analysis.
 - `ChatService` and `BusinessAnalysisService` use `@RegisterAiService`, `@SystemMessage`, and `@UserMessage`.
+- `BusinessAnalysisService` can invoke `getLowStockProducts()` through a LangChain4j Tool backed by `ProductRepository`.
 - Four business entities and four `PanacheRepository<Entity>` implementations provide database access.
 - Flyway creates the schema and loads deterministic business data; Hibernate validates the mappings at startup.
+- Focused request and tool logs record AI boundaries, tool invocation and result counts, timings, and meaningful failures without logging prompt contents.
 
 The AI prompts are zero-shot and ask Gemini to avoid inventing data. Business analysis asks it to separate facts from assumptions. These are prompt instructions, not guarantees of factual accuracy. The configured chat-model temperature is `0.1`.
 
@@ -41,7 +43,9 @@ Backend/
 │   │       └── BusinessAnalysisDTO.java
 │   ├── product/
 │   │   ├── Product.java
-│   │   └── ProductRepository.java
+│   │   ├── ProductRepository.java
+│   │   ├── dto/LowStockProductDTO.java
+│   │   └── tools/InventoryTool.java
 │   ├── customer/
 │   │   ├── Customer.java
 │   │   └── CustomerRepository.java
@@ -74,15 +78,17 @@ Client JSON query
   → ChatResource
   → ChatService / BusinessAnalysisService
   → Google Gemini
+      ↕ when current inventory data is needed
+    InventoryTool → ProductRepository → PostgreSQL
   → String wrapped in ChatResponseDTO / BusinessAnalysisDTO
   → JSON response
 ```
 
-`ChatRequestDTO` contains only `query`. No conversation history is passed to either AI service. PostgreSQL is currently a separate persistence foundation and is not exposed to the LLM through Tools. The endpoints do not query the repositories.
+`ChatRequestDTO` contains only `query`. No conversation history is passed to either AI service. `BusinessAnalysisService` registers `InventoryTool`; Gemini decides whether to invoke its read-only low-stock query based on the request. The general chat service has no database tools.
 
 ## Database
 
-Compose configures the official `postgres:18` image. Database access uses blocking JDBC and Hibernate ORM, with application-scoped `ProductRepository`, `CustomerRepository`, `OrderRepository`, and `OrderItemRepository`. These repositories have no custom queries yet.
+Compose configures the official `postgres:18` image. Database access uses blocking JDBC and Hibernate ORM, with application-scoped `ProductRepository`, `CustomerRepository`, `OrderRepository`, and `OrderItemRepository`. `ProductRepository.findLowStockProducts()` is the current custom read query; it selects products whose `stockQuantity` is at or below `minimumStock`.
 
 ### Data Model
 
@@ -221,34 +227,34 @@ The AI service returns a `String`, which the resource wraps in `ChatResponseDTO`
 ```bash
 curl http://localhost:8080/api/chat/business-analysis \
   --header 'Content-Type: application/json' \
-  --data '{"query":"Revenue rose 10%, but profit fell 5%. What should we investigate?"}'
+  --data '{"query":"Do we have any products that need restocking?"}'
 ```
 
 ```json
 {
-  "summary": "Revenue increased while profit declined.",
-  "insights": ["The figures alone do not establish the cause."],
-  "recommendations": ["Compare costs, discounts, and product mix between periods."]
+  "summary": "Three products currently need restocking.",
+  "insights": ["USB-C Cable has the largest gap between current and minimum stock."],
+  "recommendations": ["Prioritize replenishing the products returned by the inventory tool."]
 }
 ```
 
-`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. This endpoint analyzes the supplied query, not stored business records.
+`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. For current inventory questions, the endpoint can use stored product data through `getLowStockProducts()`. Tool calls and returned counts are logged at `INFO`; AI request completion timing is logged without recording the query text.
 
 ## Current Limitations
 
-- No LangChain4j Tool Calling, write tools, or LLM access to PostgreSQL.
+- The only LangChain4j tool is the read-only low-stock inventory query; there are no write tools or tools for sales, individual product stock, or customer statistics.
 - No server-side conversation memory or persisted chat history.
 - No embeddings, pgvector extension, semantic search, or RAG.
 - No business CRUD endpoints or order/inventory business logic.
 - No application authentication, explicit request validation, or custom API error contract.
-- No production reliability/security/observability implementation beyond the existing framework setup and local deployment configuration; no AI response evaluation suite.
+- No metrics, distributed tracing, production alerting, or AI response evaluation suite beyond the focused application logs and existing framework setup.
 
-## Roadmap — Planned
+## Roadmap
 
-These are educational next steps, not implemented capabilities or delivery commitments:
+This educational progression distinguishes completed work from planned capabilities; planned items are not delivery commitments:
 
-1. **Completed:** PostgreSQL persistence foundation, repositories, migrations, and seed data.
-2. **Next:** Small read-only LangChain4j tools backed by repositories, such as `getSales(from, to)`, `getLowStockProducts()`, `getProductStock(productId)`, and `getCustomerStatistics(customerId)`.
+1. **Completed:** PostgreSQL persistence foundation, repositories, migrations, seed data, and `getLowStockProducts()` Tool Calling.
+2. **Next:** Additional read-only LangChain4j tools backed by repositories, such as `getSales(from, to)`, `getProductStock(productId)`, and `getCustomerStatistics(customerId)`.
 3. Conversation Memory.
 4. Embeddings.
 5. pgvector semantic search.
