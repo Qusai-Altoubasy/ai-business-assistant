@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../../domain/entities/business_analysis.dart';
 import '../../domain/entities/chat_message.dart';
 
 class AssistantMessageCard extends StatelessWidget {
@@ -18,6 +19,7 @@ class AssistantMessageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final loading = message.status == MessageStatus.sending;
     final failed = message.status == MessageStatus.error;
+    final analysis = message.analysis;
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
@@ -77,7 +79,13 @@ class AssistantMessageCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    SelectableText(message.content, style: AppTextStyles.body),
+                    if (!loading && !failed && analysis != null)
+                      _BusinessAnalysisContent(analysis: analysis)
+                    else
+                      SelectableText(
+                        message.content,
+                        style: AppTextStyles.body,
+                      ),
                     if (failed) ...[
                       const SizedBox(height: 8),
                       TextButton.icon(
@@ -97,6 +105,64 @@ class AssistantMessageCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BusinessAnalysisContent extends StatelessWidget {
+  const _BusinessAnalysisContent({required this.analysis});
+
+  final BusinessAnalysis analysis;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Summary', style: AppTextStyles.headline.copyWith(fontSize: 14)),
+        const SizedBox(height: 4),
+        SelectableText(analysis.summary, style: AppTextStyles.body),
+        if (analysis.insights.isNotEmpty)
+          _AnalysisSection(title: 'Insights', items: analysis.insights),
+        if (analysis.recommendations.isNotEmpty)
+          _AnalysisSection(
+            title: 'Recommendations',
+            items: analysis.recommendations,
+          ),
+      ],
+    );
+  }
+}
+
+class _AnalysisSection extends StatelessWidget {
+  const _AnalysisSection({required this.title, required this.items});
+
+  final String title;
+  final List<String> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: AppTextStyles.headline.copyWith(fontSize: 14)),
+          for (final item in items)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('•  ', style: AppTextStyles.body),
+                  Expanded(
+                    child: SelectableText(item, style: AppTextStyles.body),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

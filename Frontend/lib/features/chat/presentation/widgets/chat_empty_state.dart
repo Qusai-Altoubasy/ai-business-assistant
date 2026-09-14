@@ -58,7 +58,7 @@ class ChatEmptyState extends StatelessWidget {
               SizedBox(width: 8),
               Icon(Icons.circle, size: 4, color: AppColors.outlineSoft),
               SizedBox(width: 8),
-              Text('POST /api/chat', style: AppTextStyles.mono),
+              Text('Business analysis', style: AppTextStyles.mono),
             ],
           ),
         ),
@@ -72,8 +72,8 @@ class ChatEmptyState extends StatelessWidget {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
           child: const Text(
-            'Ask a question and the assistant will send it to the current backend. '
-            'Data tools, RAG, citations, and multi-turn memory are planned extensions.',
+            'Ask a business question to get a summary, insights, '
+            'and recommendations.',
             textAlign: TextAlign.center,
             style: AppTextStyles.body,
           ),

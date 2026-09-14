@@ -1,12 +1,13 @@
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/api_exception.dart';
+import '../models/business_analysis_response.dart';
 
 class ChatRemoteDataSource {
   const ChatRemoteDataSource(this._apiClient);
 
   final ApiClient _apiClient;
 
-  Future<String> sendMessage(String message) async {
+  Future<BusinessAnalysisResponse> sendMessage(String message) async {
     final normalized = message.trim();
     if (normalized.isEmpty) {
       throw const ApiException(
@@ -16,24 +17,9 @@ class ChatRemoteDataSource {
     }
 
     final response = await _apiClient.post(
-      '/api/chat',
+      '/api/chat/business-analysis',
       data: <String, String>{'query': normalized},
     );
-    final data = response.data;
-    if (data is! Map<String, dynamic> || data['response'] is! String) {
-      throw const ApiException(
-        ApiFailureType.malformed,
-        'The AI service returned an unexpected response.',
-      );
-    }
-
-    final content = (data['response'] as String).trim();
-    if (content.isEmpty) {
-      throw const ApiException(
-        ApiFailureType.emptyResponse,
-        'The AI service returned an empty response.',
-      );
-    }
-    return content;
+    return BusinessAnalysisResponse.fromJson(response.data);
   }
 }
