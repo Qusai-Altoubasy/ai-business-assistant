@@ -13,9 +13,9 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 
 ## Current Learning Stage
 
-The current implementation demonstrates a structured chat API, declarative AI Services, prompting basics, temperature experimentation, and read-only LangChain4j tools for inventory, sales, and the current application date.
+The current implementation demonstrates a structured chat API, declarative AI Services, a resource-based business prompt, temperature experimentation, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
 
-The Flutter client sends individual queries to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; conversation history is not sent to the backend or persisted. Sales, inventory, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
+The Flutter client sends individual queries to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; conversation history is not sent to the backend or persisted. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
 
 ### Available Business Data
 
@@ -24,17 +24,20 @@ The Flutter client sends individual queries to `POST /api/chat` and renders the 
 | Low-stock products | `InventoryTools.getLowStockProducts()` | Reads products whose quantity is at or below their minimum stock. |
 | Product stock | `InventoryTools.getProductStock(productId)` | Reads one product's ID, name, quantity, and minimum stock. |
 | Sales by period | `SalesTools.getSales(from, to)` | Returns total recorded order amounts and order count for an inclusive date range; both dates are required and the start cannot follow the end. |
+| Customer purchase statistics | `CustomerTools.getCustomerStatistics(customerId)` | Returns the customer's ID/name, order count, total spent, and average order value across all recorded orders. A missing customer is rejected; an existing customer with no orders has zero totals. |
 | Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
 
-The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Company-policy retrieval, customer statistics, RAG, and conversation memory are not implemented.
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval, RAG, and conversation memory are not implemented.
 
 ### Prompting
 
-- `@SystemMessage` defines the assistant's role and instructions; `@UserMessage` supplies the query.
+- `@SystemMessage(fromResource = "prompts/business-analysis-system.txt")` loads the assistant's role and instructions from [the backend prompt](Backend/src/main/resources/prompts/business-analysis-system.txt); `@UserMessage` supplies the query.
 - The current service prompt is zero-shot. One-shot / few-shot prompting remains an experimentation topic.
 - Temperature is currently `0.1` in `application.properties` for experimentation.
 - Structured output maps business analysis to `BusinessAnalysisDTO`.
-- Prompts ask the model not to invent business data and to distinguish facts from assumptions. These instructions do not guarantee factual accuracy.
+- The prompt allows general business concepts within the supported inventory, products, sales, orders, and customers domains; company-specific questions use available tools as needed.
+- Unrelated questions are instructed to return a structured out-of-scope response: a brief summary, empty insights, and one suggestion to ask a supported business question.
+- The prompt asks the model not to invent business data, classifications, trends, or customer segments without supporting evidence. Optional suggestions must be labeled as possibilities. These instructions do not guarantee factual accuracy and are not a separate API validation layer.
 
 ## Architecture
 
@@ -47,13 +50,13 @@ Quarkus REST API (ChatResource)
   ↓
 LangChain4j AI Service (BusinessAnalysisService)
   ↓
-Google Gemini ↔ InventoryTools / SalesTools → repositories → PostgreSQL
+Google Gemini ↔ InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
               ↔ CommonTools → current application date
   ↓
 BusinessAnalysisDTO → JSON → Flutter analysis sections
 ```
 
-The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, and request/analysis DTOs belong to `chat`. Inventory and sales tools live with their business features; the shared current-date tool lives in `common.tools`.
+The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, and request/analysis DTOs belong to `chat`. Inventory, sales, and customer tools live with their business features; the shared current-date tool lives in `common.tools`. System instructions live under `src/main/resources/prompts` and are packaged with the backend.
 
 There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter consumes only the final analysis DTO and does not receive tool execution details.
 
@@ -75,14 +78,16 @@ Backend/
 │       ├── ChatRequestDTO.java
 │       └── BusinessAnalysisDTO.java
 ├── src/main/java/com/aibusinessassistant/product/  # Product, repository, DTOs, and InventoryTools
-├── src/main/java/com/aibusinessassistant/customer/ # Customer + CustomerRepository
-├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem, repositories, sales DTO and tools
+├── src/main/java/com/aibusinessassistant/customer/ # Customer, repository, statistics DTO and CustomerTools
+├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem, repositories, sales/customer aggregates and SalesTools
 ├── src/main/java/com/aibusinessassistant/common/   # CommonTools (current date)
 ├── src/main/resources/
 │   ├── application.properties
+│   ├── prompts/business-analysis-system.txt
 │   └── db/migration/              # Flyway V1 schema and V2 seed data
 ├── src/test/java/com/aibusinessassistant/chat/ChatResourceTest.java
 ├── src/test/java/com/aibusinessassistant/order/BusinessPersistenceTest.java
+├── src/test/java/com/aibusinessassistant/customer/CustomerToolsTest.java
 ├── .mvn/wrapper/
 ├── Dockerfile
 ├── mvnw
@@ -219,6 +224,8 @@ Illustrative response:
 
 Generated responses vary. Calling the endpoint sends the query to Gemini and may incur API usage costs. Flutter preserves the structured fields and hides empty insight/recommendation sections.
 
+Other supported queries include `"How much did we sell from January 1 to March 31, 2026?"`, `"What is the current stock for product ID 1?"`, and `"What are the purchase statistics for customer ID 1?"`. With the original seed data, customer 1 (Maya Reed) has three orders totaling `483.00`, with an average order value of `161.00`. These values are internal tool data; the HTTP response remains the same three analysis fields.
+
 ## Verification
 
 Start PostgreSQL and load `deploy/.env` into the shell with the JDBC mappings shown above, then run the backend build and tests from the repository root:
@@ -228,7 +235,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint test substitutes `BusinessAnalysisService`, verifies all three response fields and query forwarding, and does not call Gemini. Four persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. There are no dedicated tool-invocation or AI response-quality tests yet.
+The endpoint test substitutes `BusinessAnalysisService` and verifies all three response fields and query forwarding. Four persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
 
 For the frontend, from the repository root:
 
@@ -247,8 +254,8 @@ Never commit API keys. Keep real secrets in local environment files or backend e
 
 ## Roadmap
 
-1. **Completed:** PostgreSQL persistence, structured chat integration, low-stock and product-stock queries, sales summaries, and current-date Tool Calling.
-2. Additional explicit business tools, such as customer statistics.
+1. **Completed:** PostgreSQL persistence, structured chat integration, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
+2. Additional explicit read-only business tools beyond the current inventory, sales, and customer aggregates.
 3. Conversation Memory.
 4. Embeddings and pgvector.
 5. RAG.

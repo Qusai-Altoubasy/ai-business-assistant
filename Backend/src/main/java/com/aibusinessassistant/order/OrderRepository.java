@@ -1,5 +1,6 @@
 package com.aibusinessassistant.order;
 
+import com.aibusinessassistant.order.dto.CustomerOrderStatisticsDTO;
 import com.aibusinessassistant.order.dto.SalesSummaryDTO;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,6 +23,20 @@ public class OrderRepository implements PanacheRepository<Order> {
                     """, SalesSummaryDTO.class)
                 .setParameter("from", from)
                 .setParameter("to", to)
+                .getSingleResult();
+    }
+
+    public CustomerOrderStatisticsDTO getCustomerOrderStatistics(Long customerId) {
+        return getEntityManager()
+                .createQuery("""
+                        SELECT new CustomerOrderStatisticsDTO(
+                            COUNT(o),
+                            COALESCE(SUM(o.totalAmount), 0)
+                        )
+                        FROM Order o
+                        WHERE o.customer.id = :customerId
+                        """, CustomerOrderStatisticsDTO.class)
+                .setParameter("customerId", customerId)
                 .getSingleResult();
     }
 }

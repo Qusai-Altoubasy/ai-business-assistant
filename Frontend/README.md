@@ -1,9 +1,10 @@
 # AI Business Assistant — Flutter frontend
 
 Desktop-first Flutter client for the backend's AI chat endpoint. The
-current implementation provides sales and inventory analysis through chat.
-The sidebar marks these capabilities as `In chat`; separate module screens
-are not implemented, and the remaining capabilities are marked `Planned`.
+current implementation provides sales, inventory, and customer purchase analysis
+through the existing chat flow.
+The sidebar marks Analytics, Data Sources, and Tools as `In chat`; separate
+module screens are not implemented, and the remaining modules are marked `Planned`.
 
 ## Prerequisites
 
@@ -61,11 +62,21 @@ address reachable from that device instead of `localhost`.
   search, conversation memory, citations, and evaluation remain planned.
 
 The backend is the authority for available data: it can read low-stock products,
-stock for a product ID, and recorded revenue/order counts in an inclusive date
-range. Relative-date questions use the backend's current date. Seeded orders
+stock for a product ID, recorded revenue/order counts in an inclusive date
+range, and purchase statistics for a customer ID (order count, total spent,
+and average order value across all recorded orders). Relative-date questions
+use the backend's current date. Seeded orders
 cover January–March 2026; last month may be outside that period, so the explicit
-January–March suggested prompt is useful for the demo. There is no customer
-statistics or company-policy retrieval capability yet.
+January–March suggested prompt is useful for the demo. Customer analysis can be
+requested by typing, for example, `What are the purchase statistics for customer
+ID 1?` in the same composer; it has no dedicated suggested prompt or profile
+screen. Company-policy retrieval is not implemented.
+
+The backend's resource-based prompt supports inventory, products, sales, orders,
+customers, and related general business concepts. It instructs unrelated
+requests to return an out-of-scope summary, empty insights, and a business-focused
+recommendation. The frontend renders those fields through the same assistant
+widget; it does not implement separate domain filtering or tool-call UI.
 
 The backend endpoint accepts `{"query":"..."}` and returns
 `{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
