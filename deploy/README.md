@@ -53,9 +53,14 @@ Open the frontend at <http://127.0.0.1:3000>. The backend chat endpoint is
 
 It accepts `{"query":"..."}` and returns `summary`, `insights`, and
 `recommendations`, which Flutter renders as analysis sections. Sales summaries,
-low-stock products, product stock, and relative-date queries are available
-through this chat endpoint. The backend uses read-only tools internally; the
-frontend receives only the final analysis.
+low-stock products, product stock, customer purchase statistics, and relative-date
+queries are available through this chat endpoint. The backend uses read-only
+tools internally; the frontend receives only the final analysis.
+
+Customer statistics are requested through the same composer and endpoint, for
+example `What are the purchase statistics for customer ID 1?`. They aggregate
+all recorded orders for that customer; no new service, route, or deployment
+variable is required.
 
 Validate the resolved Compose configuration:
 
@@ -104,6 +109,14 @@ To bypass Docker build-layer cache and check for newer base images:
 ```bash
 docker compose build --no-cache --pull backend frontend
 docker compose up -d --force-recreate backend frontend
+```
+
+The system prompt at `Backend/src/main/resources/prompts/business-analysis-system.txt`
+is packaged with the backend, rather than mounted or loaded from `.env`. After
+changing tools or this prompt, rebuild and recreate the backend image:
+
+```bash
+docker compose up -d --build --force-recreate backend
 ```
 
 `API_BASE_URL` is compiled into the Flutter bundle. Changing it in `.env`
