@@ -9,21 +9,21 @@ class AppSidebar extends StatelessWidget {
 
   final VoidCallback onNewChat;
 
-  static const _futureModules = <(IconData, String)>[
-    (Icons.insights_outlined, 'Analytics'),
-    (Icons.dataset_outlined, 'Knowledge Base'),
-    (Icons.storage_outlined, 'Data Sources'),
-    (Icons.handyman_outlined, 'Tools'),
-    (Icons.fact_check_outlined, 'Evaluation'),
-    (Icons.settings_outlined, 'Settings'),
+  static const _modules = <(IconData, String, String)>[
+    (Icons.insights_outlined, 'Analytics', 'In chat'),
+    (Icons.dataset_outlined, 'Knowledge Base', 'Planned'),
+    (Icons.storage_outlined, 'Data Sources', 'In chat'),
+    (Icons.handyman_outlined, 'Tools', 'In chat'),
+    (Icons.fact_check_outlined, 'Evaluation', 'Planned'),
+    (Icons.settings_outlined, 'Settings', 'Planned'),
   ];
 
-  static const _recent = <String>[
+  static const _examples = <String>[
     'Monthly Sales Analysis',
     'Low Stock Products Alert',
-    'Return Policy Inquiry',
-    'Q3 Revenue Breakdown',
-    'Inventory Audit Violations',
+    'Product Stock Check',
+    'Sales: January–March 2026',
+    'Restocking Priorities',
   ];
 
   @override
@@ -92,19 +92,19 @@ class AppSidebar extends StatelessWidget {
                       selected: true,
                     ),
                     const _SectionLabel('Architecture modules'),
-                    for (final module in _futureModules)
+                    for (final module in _modules)
                       _NavItem(
                         icon: module.$1,
                         label: module.$2,
-                        trailing: const _Tag(label: 'Soon'),
+                        trailing: _Tag(label: module.$3),
                         disabled: true,
                       ),
                     const SizedBox(height: AppSpacing.md),
                     const _SectionLabel(
-                      'Recent conversations',
+                      'Example questions',
                       trailing: Icons.history,
                     ),
-                    for (final title in _recent)
+                    for (final title in _examples)
                       _NavItem(
                         icon: Icons.article_outlined,
                         label: title,

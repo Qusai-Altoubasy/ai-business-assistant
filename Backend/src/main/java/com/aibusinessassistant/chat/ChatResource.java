@@ -1,10 +1,8 @@
 package com.aibusinessassistant.chat;
 
 import com.aibusinessassistant.chat.ai.BusinessAnalysisService;
-import com.aibusinessassistant.chat.ai.ChatService;
 import com.aibusinessassistant.chat.dto.BusinessAnalysisDTO;
 import com.aibusinessassistant.chat.dto.ChatRequestDTO;
-import com.aibusinessassistant.chat.dto.ChatResponseDTO;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
@@ -21,28 +19,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ChatResource {
 
-    private final ChatService chatService;
     private final BusinessAnalysisService businessAnalysisService;
 
     @POST
-    public ChatResponseDTO chat(ChatRequestDTO request) {
-        String query = request.query();
-        log.info("AI request received: chat (queryLength={})", queryLength(query));
-        long startedAt = System.nanoTime();
-
-        try {
-            ChatResponseDTO response = new ChatResponseDTO(chatService.chat(query));
-            log.debug("AI request completed: chat (durationMs={})", elapsedMilliseconds(startedAt));
-            return response;
-        } catch (RuntimeException exception) {
-            log.error("AI request failed: chat (durationMs={})", elapsedMilliseconds(startedAt), exception);
-            throw exception;
-        }
-    }
-
-    @POST
-    @Path("/business-analysis")
-    public BusinessAnalysisDTO businessAnalysisChat(ChatRequestDTO request) {
+    public BusinessAnalysisDTO chat(ChatRequestDTO request) {
         String query = request.query();
         log.info("AI request received: business-analysis (queryLength={})", queryLength(query));
         long startedAt = System.nanoTime();

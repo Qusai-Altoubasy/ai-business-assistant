@@ -54,7 +54,7 @@ class ChatHeader extends StatelessWidget {
                         ),
                         if (!compact)
                           const Text(
-                            'Ask the current AI endpoint about your business.',
+                            'Analyze sales and inventory with your business data.',
                             style: AppTextStyles.bodySmall,
                           ),
                       ],

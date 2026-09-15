@@ -24,7 +24,7 @@ void main() {
       expect(response.summary, 'Stock needs attention.');
       expect(response.insights, ['Low stock']);
       expect(response.recommendations, ['Restock soon.']);
-      expect(client.lastPath, '/api/chat/business-analysis');
+      expect(client.lastPath, '/api/chat');
       expect(client.lastData, <String, String>{'query': 'Stock?'});
       final domain = response.toDomain();
       expect(domain.summary, response.summary);

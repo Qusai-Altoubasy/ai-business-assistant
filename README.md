@@ -13,14 +13,25 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 
 ## Current Learning Stage
 
-The current implementation demonstrates a chat API, declarative AI Services, prompting basics, structured output, temperature experimentation, a read-only database-backed LangChain4j tool, and basic prompt-based handling of hallucinations and missing data.
+The current implementation demonstrates a structured chat API, declarative AI Services, prompting basics, temperature experimentation, and read-only LangChain4j tools for inventory, sales, and the current application date.
 
-The Flutter client sends individual queries to the chat endpoint, displays responses, and supports suggested prompts, inline errors with retry, and resetting the local chat. Messages live in client state; conversation history is not sent to the backend or persisted. Sidebar modules and recent conversations are placeholders. The business-analysis endpoint is currently available through an HTTP client, with no dedicated Flutter integration.
+The Flutter client sends individual queries to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; conversation history is not sent to the backend or persisted. Sales, inventory, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
+
+### Available Business Data
+
+| Capability | Backend implementation | Current behavior |
+| --- | --- | --- |
+| Low-stock products | `InventoryTools.getLowStockProducts()` | Reads products whose quantity is at or below their minimum stock. |
+| Product stock | `InventoryTools.getProductStock(productId)` | Reads one product's ID, name, quantity, and minimum stock. |
+| Sales by period | `SalesTools.getSales(from, to)` | Returns total recorded order amounts and order count for an inclusive date range; both dates are required and the start cannot follow the end. |
+| Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
+
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Company-policy retrieval, customer statistics, RAG, and conversation memory are not implemented.
 
 ### Prompting
 
 - `@SystemMessage` defines the assistant's role and instructions; `@UserMessage` supplies the query.
-- Both current prompts are zero-shot. One-shot / few-shot prompting is an experimentation topic; no demonstration examples are included in the current service prompts.
+- The current service prompt is zero-shot. One-shot / few-shot prompting remains an experimentation topic.
 - Temperature is currently `0.1` in `application.properties` for experimentation.
 - Structured output maps business analysis to `BusinessAnalysisDTO`.
 - Prompts ask the model not to invent business data and to distinguish facts from assumptions. These instructions do not guarantee factual accuracy.
@@ -34,16 +45,17 @@ Flutter / HTTP client
   ↓
 Quarkus REST API (ChatResource)
   ↓
-LangChain4j AI Service (ChatService / BusinessAnalysisService)
+LangChain4j AI Service (BusinessAnalysisService)
   ↓
-Google Gemini ↔ InventoryTool → ProductRepository → PostgreSQL
+Google Gemini ↔ InventoryTools / SalesTools → repositories → PostgreSQL
+              ↔ CommonTools → current application date
   ↓
-String / structured Java record → JSON response to the client
+BusinessAnalysisDTO → JSON → Flutter analysis sections
 ```
 
-The backend follows a **feature-based architecture**: the REST resource, AI interfaces, and DTOs belong to `chat`. Both `@RegisterAiService` interfaces live in `chat.ai`; request, response, and structured-output records live in `chat.dto`.
+The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, and request/analysis DTOs belong to `chat`. Inventory and sales tools live with their business features; the shared current-date tool lives in `common.tools`.
 
-There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. `BusinessAnalysisService` exposes `InventoryTool` to Gemini so inventory questions can query current low-stock products through `ProductRepository`. Memory and RAG remain planned additions.
+There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter consumes only the final analysis DTO and does not receive tool execution details.
 
 ## Project Structure
 
@@ -58,15 +70,14 @@ Backend/
 ├── src/main/java/com/aibusinessassistant/chat/
 │   ├── ChatResource.java
 │   ├── ai/
-│   │   ├── ChatService.java
 │   │   └── BusinessAnalysisService.java
 │   └── dto/
 │       ├── ChatRequestDTO.java
-│       ├── ChatResponseDTO.java
 │       └── BusinessAnalysisDTO.java
-├── src/main/java/com/aibusinessassistant/product/  # Product, repository, inventory DTO, and tool
+├── src/main/java/com/aibusinessassistant/product/  # Product, repository, DTOs, and InventoryTools
 ├── src/main/java/com/aibusinessassistant/customer/ # Customer + CustomerRepository
-├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem + repositories
+├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem, repositories, sales DTO and tools
+├── src/main/java/com/aibusinessassistant/common/   # CommonTools (current date)
 ├── src/main/resources/
 │   ├── application.properties
 │   └── db/migration/              # Flyway V1 schema and V2 seed data
@@ -180,32 +191,14 @@ On backend startup, Flyway applies `V1__create_business_schema.sql` and `V2__see
 
 ## API
 
-Both endpoints consume and produce `application/json`. Both accept `ChatRequestDTO` with a single string field, `query`.
+The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a single string field, `query`.
 
 ### `POST /api/chat`
 
-Returns free-form AI text wrapped in `ChatResponseDTO` under `response`.
+Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. This is the endpoint used by Flutter. There is no separate business-analysis route or free-form response endpoint.
 
 ```bash
 curl --request POST http://localhost:8080/api/chat \
-  --header 'Content-Type: application/json' \
-  --data '{"query":"Hello"}'
-```
-
-Example response shape:
-
-```json
-{
-  "response": "I can help answer business questions."
-}
-```
-
-### `POST /api/chat/business-analysis`
-
-Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. For current inventory questions, Gemini can invoke the read-only `getLowStockProducts()` tool, which queries PostgreSQL and returns products whose stock is at or below their configured minimum.
-
-```bash
-curl --request POST http://localhost:8080/api/chat/business-analysis \
   --header 'Content-Type: application/json' \
   --data '{"query":"Do we have any products that need restocking?"}'
 ```
@@ -219,12 +212,12 @@ Illustrative response:
     "USB-C Cable has the largest gap between current and minimum stock."
   ],
   "recommendations": [
-    "Prioritize replenishing the products returned by the inventory tool."
+    "Prioritize replenishing USB-C Cable and the other low-stock products."
   ]
 }
 ```
 
-Generated responses vary. Calling either endpoint sends the query to Gemini and may incur API usage costs.
+Generated responses vary. Calling the endpoint sends the query to Gemini and may incur API usage costs. Flutter preserves the structured fields and hides empty insight/recommendation sections.
 
 ## Verification
 
@@ -235,7 +228,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint test substitutes a test chat service and does not call Gemini. Persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. There is currently no dedicated business-analysis endpoint test.
+The endpoint test substitutes `BusinessAnalysisService`, verifies all three response fields and query forwarding, and does not call Gemini. Four persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. There are no dedicated tool-invocation or AI response-quality tests yet.
 
 For the frontend, from the repository root:
 
@@ -243,9 +236,10 @@ For the frontend, from the repository root:
 cd Frontend
 flutter analyze
 flutter test
+flutter build web --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
 
-The existing Flutter tests cover chat state handling and the remote request/response contract.
+The Flutter tests cover structured parsing, chat state, normalized failures and retry, section visibility, suggested prompts, keyboard input, and reset behavior.
 
 ## Security
 
@@ -253,8 +247,8 @@ Never commit API keys. Keep real secrets in local environment files or backend e
 
 ## Roadmap
 
-1. **Completed:** PostgreSQL persistence and the read-only `getLowStockProducts()` LangChain4j tool.
-2. Additional explicit business tools for sales, product stock, and customer statistics.
+1. **Completed:** PostgreSQL persistence, structured chat integration, low-stock and product-stock queries, sales summaries, and current-date Tool Calling.
+2. Additional explicit business tools, such as customer statistics.
 3. Conversation Memory.
 4. Embeddings and pgvector.
 5. RAG.
