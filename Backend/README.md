@@ -1,8 +1,8 @@
 # AI Business Assistant — Backend
 
-The Quarkus backend for an educational AI Business Assistant. It currently exposes two Gemini-backed AI endpoints and a PostgreSQL persistence foundation for business data.
+The Quarkus backend for an educational AI Business Assistant. It exposes one Gemini-backed structured chat endpoint and reads business data from PostgreSQL.
 
-The learning progression starts with prompting, structured output, PostgreSQL, and a read-only inventory tool, which are implemented. Additional Tool Calling, Memory, Embeddings, pgvector, RAG, and production reliability/evaluation are future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
+Prompting, structured output, PostgreSQL, and read-only inventory, sales, and current-date tools are implemented. Customer statistics, Memory, Embeddings, pgvector, RAG, and further reliability/evaluation remain future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
 
 ## Tech Stack
 
@@ -17,15 +17,16 @@ Quarkus and LangChain4j dependencies use the BOMs in [pom.xml](pom.xml). The Pos
 
 ## Current Implemented Features
 
-- `POST /api/chat` returns free-form AI text in a JSON response.
-- `POST /api/chat/business-analysis` returns a structured business analysis.
-- `ChatService` and `BusinessAnalysisService` use `@RegisterAiService`, `@SystemMessage`, and `@UserMessage`.
-- `BusinessAnalysisService` can invoke `getLowStockProducts()` through a LangChain4j Tool backed by `ProductRepository`.
+- `POST /api/chat` returns `BusinessAnalysisDTO` with `summary`, `insights`, and `recommendations`.
+- `BusinessAnalysisService` uses `@RegisterAiService`, `@SystemMessage`, and `@UserMessage`.
+- Inventory tools read low-stock products and stock for an individual product ID through `ProductRepository`.
+- Sales tools aggregate recorded order amounts and order count for an inclusive date range through `OrderRepository`.
+- The current-date tool supports relative-date questions using the backend's `LocalDate.now()`.
 - Four business entities and four `PanacheRepository<Entity>` implementations provide database access.
 - Flyway creates the schema and loads deterministic business data; Hibernate validates the mappings at startup.
 - Focused request and tool logs record AI boundaries, tool invocation and result counts, timings, and meaningful failures without logging prompt contents.
 
-The AI prompts are zero-shot and ask Gemini to avoid inventing data. Business analysis asks it to separate facts from assumptions. These are prompt instructions, not guarantees of factual accuracy. The configured chat-model temperature is `0.1`.
+The AI prompt is zero-shot and asks Gemini to avoid inventing data, use the appropriate tools, and separate facts from assumptions. These are prompt instructions, not guarantees of factual accuracy. The configured chat-model temperature is `0.1`.
 
 ## Architecture
 
@@ -35,25 +36,27 @@ Backend/
 │   ├── chat/
 │   │   ├── ChatResource.java
 │   │   ├── ai/
-│   │   │   ├── ChatService.java
 │   │   │   └── BusinessAnalysisService.java
 │   │   └── dto/
 │   │       ├── ChatRequestDTO.java
-│   │       ├── ChatResponseDTO.java
 │   │       └── BusinessAnalysisDTO.java
 │   ├── product/
 │   │   ├── Product.java
 │   │   ├── ProductRepository.java
 │   │   ├── dto/LowStockProductDTO.java
-│   │   └── tools/InventoryTool.java
+│   │   ├── dto/ProductStockDTO.java
+│   │   └── tools/InventoryTools.java
 │   ├── customer/
 │   │   ├── Customer.java
 │   │   └── CustomerRepository.java
-│   └── order/
-│       ├── Order.java
-│       ├── OrderItem.java
-│       ├── OrderRepository.java
-│       └── OrderItemRepository.java
+│   ├── order/
+│   │   ├── Order.java
+│   │   ├── OrderItem.java
+│   │   ├── OrderRepository.java
+│   │   ├── OrderItemRepository.java
+│   │   ├── dto/SalesSummaryDTO.java
+│   │   └── tools/SalesTools.java
+│   └── common/tools/CommonTools.java
 ├── src/main/resources/
 │   ├── application.properties
 │   └── db/migration/
@@ -69,26 +72,38 @@ Backend/
 └── pom.xml
 ```
 
-Packages group code by business feature. The chat resource, AI interfaces, and DTOs live together under `chat`; each persistence feature owns its entities and repositories. There are no global controller, service, repository, or entity packages.
+Packages group code by business feature. The chat resource, AI interface, and DTOs live together under `chat`; each persistence feature owns its entities, repositories, and business tools. The current-date tool is shared under `common.tools`.
 
 ### Request Flow
 
 ```text
 Client JSON query
   → ChatResource
-  → ChatService / BusinessAnalysisService
+  → BusinessAnalysisService
   → Google Gemini
-      ↕ when current inventory data is needed
-    InventoryTool → ProductRepository → PostgreSQL
-  → String wrapped in ChatResponseDTO / BusinessAnalysisDTO
+      ↕ when business data is needed
+    InventoryTools / SalesTools → repositories → PostgreSQL
+    CommonTools → current application date
+  → BusinessAnalysisDTO
   → JSON response
 ```
 
-`ChatRequestDTO` contains only `query`. No conversation history is passed to either AI service. `BusinessAnalysisService` registers `InventoryTools`; Gemini decides whether to invoke its read-only low-stock query based on the request. The general chat service has no database tools.
+`ChatRequestDTO` contains only `query`. No conversation history is passed to the AI service. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
+
+### Registered Tools
+
+| Tool | Returned data and behavior |
+| --- | --- |
+| `getLowStockProducts()` | List of `LowStockProductDTO` containing ID, name, stock quantity, and minimum stock for products at or below their minimum. |
+| `getProductStock(productId)` | `ProductStockDTO` containing the same fields for one ID; throws `IllegalArgumentException` if that product is missing. |
+| `getSales(from, to)` | `SalesSummaryDTO` containing `from`, `to`, `totalSales`, and `orderCount`. Dates are inclusive; null dates or a reversed range are rejected. |
+| `getCurrentDate()` | Current `LocalDate` using the backend runtime's default time zone; the prompt requests it for relative dates. |
+
+These are read-only AI tools, not separate REST or CRUD endpoints. The sales summary sums stored `Order.totalAmount` and counts orders; it does not calculate units sold, margins, or customer statistics.
 
 ## Database
 
-Compose configures the official `postgres:18` image. Database access uses blocking JDBC and Hibernate ORM, with application-scoped `ProductRepository`, `CustomerRepository`, `OrderRepository`, and `OrderItemRepository`. `ProductRepository.findLowStockProducts()` is the current custom read query; it selects products whose `stockQuantity` is at or below `minimumStock`.
+Compose configures the official `postgres:18` image. Database access uses blocking JDBC and Hibernate ORM, with application-scoped `ProductRepository`, `CustomerRepository`, `OrderRepository`, and `OrderItemRepository`. `ProductRepository.findLowStockProducts()` selects products at or below `minimumStock`. `OrderRepository.getSalesSummary(from, to)` sums recorded order totals and counts orders between the supplied dates, returning zero totals/counts for an empty period.
 
 ### Data Model
 
@@ -122,7 +137,7 @@ PostgreSQL creates the database using `POSTGRES_DB` on first initialization. Fly
 | [V1__create_business_schema.sql](src/main/resources/db/migration/V1__create_business_schema.sql) | Creates the four tables, identity keys, foreign keys, required columns, unique customer emails, and indexes for relationship/date lookups. |
 | [V2__seed_business_data.sql](src/main/resources/db/migration/V2__seed_business_data.sql) | Inserts 10 products, 5 customers, 12 orders, and 24 order items; advances identity sequences past the explicit seed IDs. |
 
-The fictional seed data spans January–March 2026, includes repeat customers and products below minimum stock, and supports future monthly-sales and inventory exercises. Flyway tracks applied migrations in `flyway_schema_history`. Add new migrations for later changes instead of editing migrations already applied to a database.
+The fictional seed data spans January–March 2026, includes repeat customers and products below minimum stock, and supports the current sales and inventory queries. Relative-date questions use the actual backend date, so "last month" may fall outside the seeded period and return no sales. Flyway tracks applied migrations in `flyway_schema_history`. Add new migrations for later changes instead of editing migrations already applied to a database.
 
 The named Docker volume `ai-business-assistant-postgres-data` mounts at `/var/lib/postgresql`; PostgreSQL 18 stores its data under `18/docker`. Container recreation and `docker compose down` preserve the volume. `docker compose down -v` deletes it. Changing `POSTGRES_*` values does not reconfigure an already initialized database, and changing an image tag does not upgrade an existing database's data format.
 
@@ -202,30 +217,16 @@ java -jar target/quarkus-app/quarkus-run.jar
 
 Stop dev mode before starting the packaged application. Keep the entire `target/quarkus-app/` directory when distributing the build.
 
-The current suite contains five tests: one chat endpoint test and four persistence tests. The chat test substitutes a local AI service and does not call Gemini. Persistence tests verify migration history, seeded repository reads, historical order totals, relationships, and generated IDs. Use a development database with the original seed data. Test inserts roll back, but identity sequences advance. There is no dedicated business-analysis endpoint test or model-quality evaluation suite yet.
+The current suite contains five tests: one structured chat endpoint test and four persistence tests. The endpoint test substitutes `BusinessAnalysisService`, verifies query forwarding and all three analysis fields, and does not call Gemini. Persistence tests verify migration history, seeded repository reads, historical order totals, relationships, and generated IDs. Use a development database with the original seed data. Test inserts roll back, but identity sequences advance. There are no dedicated tool-invocation or model-quality evaluation tests yet.
 
 ## API
 
-Both endpoints consume and produce `application/json` and accept `{"query":"..."}`. Examples below use the default local port. Responses are illustrative; calling either endpoint sends the query to Gemini and may incur API usage costs.
+The endpoint consumes and produces `application/json` and accepts `{"query":"..."}`. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
 
 ### `POST /api/chat`
 
 ```bash
 curl http://localhost:8080/api/chat \
-  --header 'Content-Type: application/json' \
-  --data '{"query":"What information is useful for reviewing sales performance?"}'
-```
-
-```json
-{"response":"Start with sales by period, product, and customer, along with costs and margins."}
-```
-
-The AI service returns a `String`, which the resource wraps in `ChatResponseDTO`.
-
-### `POST /api/chat/business-analysis`
-
-```bash
-curl http://localhost:8080/api/chat/business-analysis \
   --header 'Content-Type: application/json' \
   --data '{"query":"Do we have any products that need restocking?"}'
 ```
@@ -234,15 +235,15 @@ curl http://localhost:8080/api/chat/business-analysis \
 {
   "summary": "Three products currently need restocking.",
   "insights": ["USB-C Cable has the largest gap between current and minimum stock."],
-  "recommendations": ["Prioritize replenishing the products returned by the inventory tool."]
+  "recommendations": ["Prioritize replenishing USB-C Cable and the other low-stock products."]
 }
 ```
 
-`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. For current inventory questions, the endpoint can use stored product data through `getLowStockProducts()`. Tool calls and returned counts are logged at `INFO`; AI request completion timing is logged without recording the query text.
+`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. `/api/chat` is also the endpoint used by Flutter. The previous separate business-analysis route, `ChatService`, and `ChatResponseDTO` are removed. Application logs record analysis request lengths/completion timing and tool arguments/results without recording the query text.
 
 ## Current Limitations
 
-- The only LangChain4j tool is the read-only low-stock inventory query; there are no write tools or tools for sales, individual product stock, or customer statistics.
+- Tools are read-only. Customer statistics, policy/document retrieval, write operations, units-sold analysis, and margins are not implemented.
 - No server-side conversation memory or persisted chat history.
 - No embeddings, pgvector extension, semantic search, or RAG.
 - No business CRUD endpoints or order/inventory business logic.
@@ -253,8 +254,8 @@ curl http://localhost:8080/api/chat/business-analysis \
 
 This educational progression distinguishes completed work from planned capabilities; planned items are not delivery commitments:
 
-1. **Completed:** PostgreSQL persistence foundation, repositories, migrations, seed data, and `getLowStockProducts()` Tool Calling.
-2. **Next:** Additional read-only LangChain4j tools backed by repositories, such as `getSales(from, to)`, `getProductStock(productId)`, and `getCustomerStatistics(customerId)`.
+1. **Completed:** PostgreSQL persistence, repositories, migrations, seed data, structured chat, low-stock and product-stock queries, sales summaries, and current-date Tool Calling.
+2. **Next:** Additional read-only business queries, such as `getCustomerStatistics(customerId)`.
 3. Conversation Memory.
 4. Embeddings.
 5. pgvector semantic search.

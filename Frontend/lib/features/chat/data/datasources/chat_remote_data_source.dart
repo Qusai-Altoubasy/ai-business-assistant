@@ -17,7 +17,7 @@ class ChatRemoteDataSource {
     }
 
     final response = await _apiClient.post(
-      '/api/chat/business-analysis',
+      '/api/chat',
       data: <String, String>{'query': normalized},
     );
     return BusinessAnalysisResponse.fromJson(response.data);

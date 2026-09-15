@@ -80,7 +80,7 @@ class _PromptCardState extends State<PromptCard> {
                       ),
                     ),
                     const Spacer(),
-                    const Text('MVP endpoint', style: AppTextStyles.mono),
+                    const Text('Business question', style: AppTextStyles.mono),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -113,7 +113,7 @@ class _PromptCardState extends State<PromptCard> {
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: const Text(
-                        'Advanced flow · Soon',
+                        'Available in chat',
                         style: AppTextStyles.mono,
                       ),
                     ),

@@ -14,26 +14,25 @@ class ChatEmptyState extends StatelessWidget {
       <({String category, String prompt, String description})>[
         (
           category: 'Sales analytics',
-          prompt: 'How much did we sell last month?',
-          description:
-              'Ask the current backend endpoint using this sales question.',
+          prompt: 'How much did we sell from January 1 to March 31, 2026?',
+          description: 'Review total revenue and order counts for this period.',
         ),
         (
           category: 'Inventory ops',
           prompt: 'Which products are currently low in stock?',
-          description: 'Send an inventory question to the current MVP service.',
+          description: 'Check current quantities against minimum stock levels.',
         ),
         (
-          category: 'Company policy',
-          prompt: 'What is our return policy?',
+          category: 'Product stock',
+          prompt: 'What is the current stock for product ID 1?',
           description:
-              'Use the same chat endpoint; document search is planned.',
+              'Check available quantity and the minimum stock for a product.',
         ),
         (
-          category: 'Compliance',
-          prompt: 'Which products violate our inventory policy?',
+          category: 'Monthly sales',
+          prompt: 'How much did we sell last month?',
           description:
-              'Use the MVP endpoint; hybrid analysis is not enabled yet.',
+              'Review monthly revenue using the current application date.',
         ),
       ];
 
@@ -86,7 +85,15 @@ class ChatEmptyState extends StatelessWidget {
           children: [
             _Capability(
               icon: Icons.storage_outlined,
-              label: 'PostgreSQL · Planned',
+              label: 'Business data · Available',
+            ),
+            _Capability(
+              icon: Icons.insights_outlined,
+              label: 'Sales · Available',
+            ),
+            _Capability(
+              icon: Icons.inventory_2_outlined,
+              label: 'Inventory · Available',
             ),
             _Capability(
               icon: Icons.hub_outlined,

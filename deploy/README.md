@@ -51,6 +51,12 @@ docker compose up --build
 Open the frontend at <http://127.0.0.1:3000>. The backend chat endpoint is
 `POST http://127.0.0.1:8080/api/chat`.
 
+It accepts `{"query":"..."}` and returns `summary`, `insights`, and
+`recommendations`, which Flutter renders as analysis sections. Sales summaries,
+low-stock products, product stock, and relative-date queries are available
+through this chat endpoint. The backend uses read-only tools internally; the
+frontend receives only the final analysis.
+
 Validate the resolved Compose configuration:
 
 ```bash
@@ -84,3 +90,30 @@ Load this same `deploy/.env` into the shell and map its PostgreSQL settings to
 `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` using the
 [local backend instructions](../README.md#backend). Quarkus receives these
 exported variables; no separate backend environment file is needed.
+
+## Rebuild After Changes
+
+From `deploy/`, rebuild and recreate the application containers:
+
+```bash
+docker compose up -d --build backend frontend
+```
+
+To bypass Docker build-layer cache and check for newer base images:
+
+```bash
+docker compose build --no-cache --pull backend frontend
+docker compose up -d --force-recreate backend frontend
+```
+
+`API_BASE_URL` is compiled into the Flutter bundle. Changing it in `.env`
+requires rebuilding the frontend image. The Web bootstrap cleans up legacy
+Flutter service workers/caches, and Nginx serves HTML and bootstrap files with
+`Cache-Control: no-store`. If a browser tab still runs an old bundle, close it
+and clear site data for `http://127.0.0.1:3000` before reopening it. Docker build
+cache and browser cache are separate.
+
+These commands preserve the PostgreSQL volume. Seeded sales cover January–March
+2026; use an explicit period in that range to exercise the sales demo. Questions
+such as "last month" use the backend's current date and may have no matching
+orders.
