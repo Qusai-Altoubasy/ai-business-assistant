@@ -188,7 +188,7 @@ The backend reads the following variables through [application.properties](src/m
 
 CORS allows `POST`. The test profile provides non-secret Gemini placeholders; database credentials still come from the environment.
 
-Compose reads `deploy/.env` and maps `POSTGRES_USER` to `DB_USERNAME`, `POSTGRES_PASSWORD` to `DB_PASSWORD`, and `POSTGRES_DB` into `jdbc:postgresql://postgres:5432/<database>`. `POSTGRES_PORT` controls the host database port; it does not change the internal port. `BACKEND_PORT` controls the host API port. Exported shell variables take precedence over Compose's env-file values.
+Compose reads `deploy/.env` and maps `POSTGRES_USER` to `DB_USERNAME`, `POSTGRES_PASSWORD` to `DB_PASSWORD`, and `POSTGRES_DB` into `jdbc:postgresql://ai-business-assistant-postgres:5432/<database>`. `POSTGRES_PORT` controls the host database port; it does not change the internal port. `BACKEND_PORT` controls the host API port. Exported shell variables take precedence over Compose's env-file values.
 
 Compose has development fallbacks for omitted PostgreSQL settings, including a password fallback. A directly run backend has no `DB_PASSWORD` fallback, so explicitly configure the password in the shared env file for both workflows. `API_BASE_URL` and `FRONTEND_PORT` configure the frontend deployment; see the [deployment guide](../deploy/README.md).
 

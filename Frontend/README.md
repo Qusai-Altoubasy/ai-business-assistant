@@ -120,6 +120,10 @@ flutter build web \
 
 The frontend Dockerfile builds the Web client and serves it with Nginx:
 
+With Docker Compose, set `API_BASE_URL` to the frontend origin. Nginx forwards
+`/api/` requests to the backend by container name. The standalone image build
+below can still use a directly reachable backend URL.
+
 ```bash
 cd Frontend
 docker build \
