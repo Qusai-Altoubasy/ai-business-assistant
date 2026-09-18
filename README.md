@@ -117,12 +117,12 @@ quarkus.langchain4j.ai.gemini.chat-model.model-id=${GEMINI_MODEL}
 | `GEMINI_API_KEY` | Gemini Developer API key; required for AI requests | None |
 | `GEMINI_MODEL` | Gemini chat model ID; required | None |
 | `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS | `http://127.0.0.1:3000` |
-| `API_BASE_URL` | Backend URL compiled into Flutter via `--dart-define` | `http://localhost:8080` |
+| `API_BASE_URL` | Browser URL compiled into Flutter; Compose sends `/api/` through Nginx | `http://127.0.0.1:3000` in `deploy/.env.example` |
 | `DB_USERNAME` | JDBC username for a locally run backend | `ai_business_assistant` |
 | `DB_PASSWORD` | JDBC password for a locally run backend; required | None |
 | `DB_URL` | JDBC URL for a locally run backend | `jdbc:postgresql://localhost:5432/ai_business_assistant` |
 
-Compose reads `deploy/.env` and configures the backend's `DB_*` values from `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`, using `postgres:5432` as the database host. `POSTGRES_PORT` controls the host port (default `5432`). See [deploy/.env.example](deploy/.env.example). For Maven, load the same file into the shell as shown below; Quarkus reads the exported variables.
+Compose reads `deploy/.env` and configures the backend's `DB_*` values from `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`, using `ai-business-assistant-postgres:5432` as the database address inside Docker. `POSTGRES_PORT` controls the host port (default `5432`). See [deploy/.env.example](deploy/.env.example). For Maven, load the same file into the shell as shown below; Quarkus reads the exported variables.
 
 The Gemini chat-model temperature is set directly to `0.1` in `Backend/src/main/resources/application.properties`; there is no project-defined `TEMPERATURE` environment variable. The test profile supplies non-secret Gemini placeholders.
 
@@ -172,7 +172,7 @@ These settings match the backend's default CORS origin. If you change the browse
 
 ### Docker Compose
 
-Requires Docker with the Compose plugin and the `deploy/.env` configured above. The template sets `FRONTEND_PORT=3000`, `BACKEND_PORT=8080`, `API_BASE_URL=http://127.0.0.1:8080`, and `FRONTEND_ORIGIN=http://127.0.0.1:3000`. Keep URLs and ports aligned if changing them. Exported shell variables take precedence over Compose's `.env` values.
+Requires Docker with the Compose plugin and the `deploy/.env` configured above. The template sets `FRONTEND_PORT=3000`, `BACKEND_PORT=8080`, `API_BASE_URL=http://127.0.0.1:3000`, and `FRONTEND_ORIGIN=http://127.0.0.1:3000`. Keep URLs and ports aligned if changing them. Exported shell variables take precedence over Compose's `.env` values.
 
 From the repository root:
 
@@ -182,7 +182,7 @@ docker compose config --quiet
 docker compose up --build
 ```
 
-Open [the Flutter client](http://127.0.0.1:3000). All three services publish ports only on `127.0.0.1`. The browser calls the backend directly, so `API_BASE_URL` must be browser-reachable; it is compiled into the frontend image. The backend waits for PostgreSQL's healthcheck before starting.
+Open [the Flutter client](http://127.0.0.1:3000). All three services publish ports only on `127.0.0.1`. The browser sends API requests to Nginx at the frontend origin; Nginx forwards them to the backend by container name. The backend connects to PostgreSQL by container name and waits for its healthcheck before starting.
 
 Stop and remove the containers from `deploy/`:
 

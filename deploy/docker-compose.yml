@@ -1,5 +1,6 @@
 services:
   backend:
+    container_name: ai-business-assistant-backend
     build:
       context: ../Backend
       dockerfile: Dockerfile
@@ -9,7 +10,7 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       DB_USERNAME: ${POSTGRES_USER:-ai_business_assistant}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ai_business_assistant}
+      DB_URL: jdbc:postgresql://ai-business-assistant-postgres:5432/${POSTGRES_DB:-ai_business_assistant}
     depends_on:
       postgres:
         condition: service_healthy
@@ -17,6 +18,7 @@ services:
       - "127.0.0.1:${BACKEND_PORT}:8080"
 
   frontend:
+    container_name: ai-business-assistant-frontend
     build:
       context: ../Frontend
       dockerfile: Dockerfile
@@ -24,8 +26,12 @@ services:
         API_BASE_URL: ${API_BASE_URL}
     ports:
       - "127.0.0.1:${FRONTEND_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_started
 
   postgres:
+    container_name: ai-business-assistant-postgres
     image: postgres:18
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ai_business_assistant}

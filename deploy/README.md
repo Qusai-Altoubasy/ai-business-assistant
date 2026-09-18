@@ -24,7 +24,7 @@ The deployment uses:
 | --- | --- |
 | `FRONTEND_PORT` | Host port for Flutter Web |
 | `BACKEND_PORT` | Host port for Quarkus |
-| `API_BASE_URL` | Backend URL compiled into the Flutter Web app |
+| `API_BASE_URL` | Frontend origin compiled into Flutter Web for proxied API requests |
 | `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS |
 | `GEMINI_API_KEY` | Gemini Developer API key; set this only in `.env` |
 | `GEMINI_MODEL` | Gemini chat model ID |
@@ -34,11 +34,11 @@ The deployment uses:
 | `POSTGRES_PORT` | Host PostgreSQL port; default `5432` |
 
 Compose supplies the backend's `DB_USERNAME`, `DB_PASSWORD`, and `DB_URL` from
-these PostgreSQL settings, with the JDBC URL using `postgres:5432` internally.
+these PostgreSQL settings. The backend uses `ai-business-assistant-postgres:5432`.
 
-`API_BASE_URL` uses `http://127.0.0.1:8080`, not Docker's `backend` service
-name, because Flutter Web API calls are made by the host browser rather than by
-the frontend container.
+`API_BASE_URL` uses the frontend origin, `http://127.0.0.1:3000`. The browser
+calls Nginx, which forwards `/api/` requests to
+`ai-business-assistant-backend:8080`. The browser cannot resolve Docker names.
 
 ## Run
 
