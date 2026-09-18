@@ -1,7 +1,7 @@
 # Local Docker demo
 
-This directory runs the Quarkus backend, Flutter Web frontend, and PostgreSQL 18
-in Docker for local/demo use. All services are published only on `127.0.0.1`.
+This directory runs Ollama, the Quarkus backend, Flutter Web frontend, and
+PostgreSQL 18 in Docker. Host ports are bound only to `127.0.0.1`; Ollama has no host port.
 
 ## Configuration
 
@@ -11,7 +11,7 @@ From this directory, copy the single committed template once:
 cp .env.example .env
 ```
 
-Edit `.env` to supply your Gemini Developer API key, select the model, and
+Edit `.env` to select the installed Ollama model and its host model directory, then
 configure the ports and PostgreSQL settings. If `.env` already exists, update
 it to include the template's settings instead of overwriting it. This is
 `deploy/.env` relative to the repository root; Git ignores it while tracking
@@ -24,23 +24,44 @@ The deployment uses:
 | --- | --- |
 | `FRONTEND_PORT` | Host port for Flutter Web |
 | `BACKEND_PORT` | Host port for Quarkus |
-| `API_BASE_URL` | Backend URL compiled into the Flutter Web app |
+| `API_BASE_URL` | Frontend origin used for proxied `/api/` calls; compiled into Flutter Web |
 | `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS |
-| `GEMINI_API_KEY` | Gemini Developer API key; set this only in `.env` |
-| `GEMINI_MODEL` | Gemini chat model ID |
+| `OLLAMA_MODEL` | Installed chat model; default `Jadio/Qwen3_4b_instruct_q4km`; passed at build and run time |
+| `OLLAMA_THINK` | Request model thinking; default `false`; support depends on the installed model |
+| `OLLAMA_MODELS_DIR` | Host model directory mounted read-only into Ollama; default `/usr/share/ollama/.ollama/models` |
 | `POSTGRES_DB` | Database created on first initialization; default `ai_business_assistant` |
 | `POSTGRES_USER` | Database user; default `ai_business_assistant` |
 | `POSTGRES_PASSWORD` | Database password; local development default `dev_password` |
 | `POSTGRES_PORT` | Host PostgreSQL port; default `5432` |
 
 Compose supplies the backend's `DB_USERNAME`, `DB_PASSWORD`, and `DB_URL` from
-these PostgreSQL settings, with the JDBC URL using `postgres:5432` internally.
+these PostgreSQL settings. The backend uses `ai-business-assistant-postgres:5432`.
 
-`API_BASE_URL` uses `http://127.0.0.1:8080`, not Docker's `backend` service
-name, because Flutter Web API calls are made by the host browser rather than by
-the frontend container.
+`API_BASE_URL` uses the frontend origin, `http://127.0.0.1:3000`. Browser requests
+go to Nginx, which forwards `/api/` to `ai-business-assistant-backend:8080`.
 
 ## Run
+
+Verify that `OLLAMA_MODELS_DIR` contains the model selected in `OLLAMA_MODEL`.
+The container shares those model files and does not download them again.
+
+### Selecting the installed model
+
+Set `OLLAMA_MODEL` in `.env` to the installed model name, for example:
+
+```dotenv
+OLLAMA_MODEL=Jadio/Qwen3_4b_instruct_q4km
+OLLAMA_THINK=false
+```
+
+Rebuild the backend after changing the model ID. `OLLAMA_THINK=false` requests
+replies without thinking when the installed model supports it. A single
+`BusinessAnalysisService` handles tool calls and returns `BusinessAnalysisDTO`.
+
+All four containers share the Compose network. The backend reaches
+`ai-business-assistant-ollama:11434` and `ai-business-assistant-postgres:5432`
+by name. The frontend Nginx reaches `ai-business-assistant-backend:8080` by
+name. Only the frontend, backend, and PostgreSQL publish localhost host ports.
 
 Build and start all services (the backend waits for PostgreSQL to be healthy):
 
@@ -95,6 +116,10 @@ Load this same `deploy/.env` into the shell and map its PostgreSQL settings to
 `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` using the
 [local backend instructions](../README.md#backend). Quarkus receives these
 exported variables; no separate backend environment file is needed.
+
+The Ollama model ID is fixed at build time in this Quarkus extension. Changing
+`OLLAMA_MODEL` requires rebuilding the backend, not just restarting it. Compose
+passes the selected model as a Docker build argument and runtime variable.
 
 ## Rebuild After Changes
 

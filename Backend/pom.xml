@@ -9,7 +9,7 @@
     <version>1.0.0-SNAPSHOT</version>
 
     <name>AI Business Assistant</name>
-    <description>A small Quarkus and LangChain4j demo using Google Gemini.</description>
+    <description>A small Quarkus and LangChain4j demo using Ollama.</description>
     <licenses>
         <license>
             <name>MIT License</name>
@@ -56,7 +56,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-ai-gemini</artifactId>
+            <artifactId>quarkus-langchain4j-ollama</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>

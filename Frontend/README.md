@@ -82,7 +82,7 @@ The backend endpoint accepts `{"query":"..."}` and returns
 `{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
 null lists become empty lists; blank list entries are omitted. Invalid field
 types and blank summaries produce safe inline errors with Retry. Calling it
-sends the message to Gemini and may incur API usage costs.
+sends the message to the configured Ollama server.
 
 `POST /api/chat` now returns the structured analysis directly. The previous
 separate business-analysis route and free-form `response` contract are removed.
@@ -119,6 +119,10 @@ flutter build web \
 ## Container image
 
 The frontend Dockerfile builds the Web client and serves it with Nginx:
+
+With Docker Compose, set `API_BASE_URL` to the frontend origin. Nginx forwards
+`/api/` requests to the backend container by name. The standalone image build
+below can still use a directly reachable backend URL.
 
 ```bash
 cd Frontend

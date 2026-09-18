@@ -8,7 +8,9 @@ COPY pom.xml ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B dependency:go-offline
 
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 mvn -B package -Dmaven.test.skip=true
+# Ollama's model ID is fixed at build time by Quarkus LangChain4j.
+ARG OLLAMA_MODEL=Jadio/Qwen3_4b_instruct_q4km
+RUN --mount=type=cache,target=/root/.m2 OLLAMA_MODEL="$OLLAMA_MODEL" mvn -B package -Dmaven.test.skip=true
 
 FROM eclipse-temurin:21-jre-jammy AS runtime
 
