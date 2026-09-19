@@ -5,6 +5,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,7 @@ import jakarta.enterprise.inject.Alternative;
 class ChatResourceTest {
 
     private static final String QUERY = "What can you help me with?";
+    private static final String CONVERSATION_ID = "1f5299c7-84a5-4a89-a5e4-1058debf4a31";
     static final String AI_RESPONSE = "I can help with your business questions.";
     static final List<String> INSIGHTS = List.of("Inventory and sales data are available.");
     static final List<String> RECOMMENDATIONS = List.of("Choose a product or sales period to review.");
@@ -29,7 +31,7 @@ class ChatResourceTest {
     void chatEndpointReturnsStructuredAnalysisAsJson() {
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"query\":\"" + QUERY + "\"}")
+                .body("{\"conversationId\":\"" + CONVERSATION_ID + "\",\"query\":\"" + QUERY + "\"}")
                 .when().post("/api/chat")
                 .then()
                 .statusCode(200)
@@ -39,6 +41,25 @@ class ChatResourceTest {
                 .body("recommendations", is(RECOMMENDATIONS));
 
         assertEquals(QUERY, TestBusinessAnalysisService.lastQuery);
+        assertEquals(UUID.fromString(CONVERSATION_ID), TestBusinessAnalysisService.lastConversationId);
+    }
+
+    @Test
+    void chatEndpointRequiresConversationId() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"query\":\"" + QUERY + "\"}")
+                .when().post("/api/chat")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void chatEndpointRequiresUuidConversationId() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"conversationId\":\"conversation-123\",\"query\":\"" + QUERY + "\"}")
+                .when().post("/api/chat")
+                .then().statusCode(400);
     }
 }
 
@@ -48,9 +69,11 @@ class ChatResourceTest {
 class TestBusinessAnalysisService implements BusinessAnalysisService {
 
     static volatile String lastQuery;
+    static volatile UUID lastConversationId;
 
     @Override
-    public BusinessAnalysisDTO chat(String query) {
+    public BusinessAnalysisDTO chat(UUID conversationId, String query) {
+        lastConversationId = conversationId;
         lastQuery = query;
         return new BusinessAnalysisDTO(
                 ChatResourceTest.AI_RESPONSE,

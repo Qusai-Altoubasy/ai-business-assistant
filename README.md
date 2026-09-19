@@ -15,7 +15,7 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 
 The current implementation demonstrates a structured chat API, declarative AI Services, a resource-based business prompt, temperature experimentation, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
 
-The Flutter client sends individual queries to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; conversation history is not sent to the backend or persisted. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
+The Flutter client sends queries and a stable UUID `conversationId` to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages displayed in the current tab live in Riverpod state; the backend persists successful user/assistant exchanges and retains the latest 10 whole user turns as active AI context. New Chat creates a new ID. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
 
 ### Available Business Data
 
@@ -27,7 +27,7 @@ The Flutter client sends individual queries to `POST /api/chat` and renders the 
 | Customer purchase statistics | `CustomerTools.getCustomerStatistics(customerId)` | Returns the customer's ID/name, order count, total spent, and average order value across all recorded orders. A missing customer is rejected; an existing customer with no orders has zero totals. |
 | Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
 
-The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval, RAG, and conversation memory are not implemented.
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval and RAG are not implemented. PostgreSQL restores the active conversation memory after a backend restart.
 
 ### Prompting
 
@@ -48,15 +48,17 @@ Flutter / HTTP client
   ↓
 Quarkus REST API (ChatResource)
   ↓
-LangChain4j AI Service (BusinessAnalysisService)
+LangChain4j AI Service (BusinessAnalysisService with @MemoryId)
+  ↔ TurnAwareChatMemory → PostgresChatMemoryStore → chat_memory_state
   ↓
 Google Gemini ↔ InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
               ↔ CommonTools → current application date
   ↓
-BusinessAnalysisDTO → JSON → Flutter analysis sections
+BusinessAnalysisDTO → ConversationHistoryService → chat_messages
+                    → JSON → Flutter analysis sections
 ```
 
-The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, and request/analysis DTOs belong to `chat`. Inventory, sales, and customer tools live with their business features; the shared current-date tool lives in `common.tools`. System instructions live under `src/main/resources/prompts` and are packaged with the backend.
+The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, request/analysis DTOs, conversation history, and chat memory belong to `chat`. Inventory, sales, and customer tools live with their business features; the shared current-date tool lives in `common.tools`. System instructions live under `src/main/resources/prompts` and are packaged with the backend.
 
 There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter consumes only the final analysis DTO and does not receive tool execution details.
 
@@ -74,9 +76,9 @@ Backend/
 │   ├── ChatResource.java
 │   ├── ai/
 │   │   └── BusinessAnalysisService.java
-│   └── dto/
-│       ├── ChatRequestDTO.java
-│       └── BusinessAnalysisDTO.java
+│   ├── dto/                         # Request and structured response
+│   ├── history/                     # Conversations and full message history
+│   └── memory/                      # Turn-aware window and PostgreSQL store
 ├── src/main/java/com/aibusinessassistant/product/  # Product, repository, DTOs, and InventoryTools
 ├── src/main/java/com/aibusinessassistant/customer/ # Customer, repository, statistics DTO and CustomerTools
 ├── src/main/java/com/aibusinessassistant/order/    # Order/OrderItem, repositories, sales/customer aggregates and SalesTools
@@ -84,8 +86,9 @@ Backend/
 ├── src/main/resources/
 │   ├── application.properties
 │   ├── prompts/business-analysis-system.txt
-│   └── db/migration/              # Flyway V1 schema and V2 seed data
+│   └── db/migration/              # Flyway V1/V2 business data and V3 chat history
 ├── src/test/java/com/aibusinessassistant/chat/ChatResourceTest.java
+├── src/test/java/com/aibusinessassistant/chat/memory/  # Memory tests
 ├── src/test/java/com/aibusinessassistant/order/BusinessPersistenceTest.java
 ├── src/test/java/com/aibusinessassistant/customer/CustomerToolsTest.java
 ├── .mvn/wrapper/
@@ -192,11 +195,11 @@ docker compose down
 
 PostgreSQL stores data in the named volume `ai-business-assistant-postgres-data`. Container recreation and `docker compose down` preserve it; `docker compose down -v` deletes it. `POSTGRES_DB` creates the database only on the first initialization of an empty volume. Changing `POSTGRES_*` later does not reconfigure an existing database.
 
-On backend startup, Flyway applies `V1__create_business_schema.sql` and `V2__seed_business_data.sql` inside that database. Hibernate then validates the schema; it never creates or updates tables. V2 seeds 10 products, 5 customers, 12 orders, and 24 order items across January–March 2026, including low-stock products. Order-item prices are historical unit prices; each order total matches its line items. Migrations run once and are tracked in `flyway_schema_history`; evolve the schema with new migrations instead of editing applied ones.
+On backend startup, Flyway applies `V1__create_business_schema.sql`, `V2__seed_business_data.sql`, and `V3__add_persistent_chat_history.sql` inside that database. V3 creates `conversations`, append-only `chat_messages`, and `chat_memory_state` for the active AI context. Hibernate then validates the schema; it never creates or updates tables. V2 seeds 10 products, 5 customers, 12 orders, and 24 order items across January–March 2026, including low-stock products. Order-item prices are historical unit prices; each order total matches its line items. Migrations run once and are tracked in `flyway_schema_history`; evolve the schema with new migrations instead of editing applied ones.
 
 ## API
 
-The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a single string field, `query`.
+The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a required UUID `conversationId` and a `query` string. Reuse the ID for follow-up questions and use a new UUID for a new chat.
 
 ### `POST /api/chat`
 
@@ -205,7 +208,7 @@ Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a str
 ```bash
 curl --request POST http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
-  --data '{"query":"Do we have any products that need restocking?"}'
+  --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Do we have any products that need restocking?"}'
 ```
 
 Illustrative response:
@@ -235,7 +238,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint test substitutes `BusinessAnalysisService` and verifies all three response fields and query forwarding. Four persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
+The endpoint tests substitute `BusinessAnalysisService` and verify all three response fields, ID/query forwarding, and rejection of a missing ID. Persistence tests verify Flyway migrations, seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
 
 For the frontend, from the repository root:
 
@@ -254,9 +257,9 @@ Never commit API keys. Keep real secrets in local environment files or backend e
 
 ## Roadmap
 
-1. **Completed:** PostgreSQL persistence, structured chat integration, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
+1. **Completed:** PostgreSQL persistence, structured chat integration, conversation history and turn-aware memory, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
 2. Additional explicit read-only business tools beyond the current inventory, sales, and customer aggregates.
-3. Conversation Memory.
+3. Conversation history retrieval and resume UI.
 4. Embeddings and pgvector.
 5. RAG.
 6. Further reliability, security, and observability work.
