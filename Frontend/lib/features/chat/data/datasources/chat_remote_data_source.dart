@@ -7,7 +7,10 @@ class ChatRemoteDataSource {
 
   final ApiClient _apiClient;
 
-  Future<BusinessAnalysisResponse> sendMessage(String message) async {
+  Future<BusinessAnalysisResponse> sendMessage(
+    String message,
+    String conversationId,
+  ) async {
     final normalized = message.trim();
     if (normalized.isEmpty) {
       throw const ApiException(
@@ -18,7 +21,10 @@ class ChatRemoteDataSource {
 
     final response = await _apiClient.post(
       '/api/chat',
-      data: <String, String>{'query': normalized},
+      data: <String, String>{
+        'conversationId': conversationId,
+        'query': normalized,
+      },
     );
     return BusinessAnalysisResponse.fromJson(response.data);
   }

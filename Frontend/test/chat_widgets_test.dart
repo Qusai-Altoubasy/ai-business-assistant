@@ -182,7 +182,7 @@ class _PendingRepository implements ChatRepository {
   final result = Completer<BusinessAnalysis>();
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message) {
+  Future<BusinessAnalysis> sendMessage(String message, String conversationId) {
     messages.add(message);
     return result.future;
   }

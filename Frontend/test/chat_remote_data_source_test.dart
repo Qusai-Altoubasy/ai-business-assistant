@@ -19,13 +19,16 @@ void main() {
       });
       final response = await ChatRemoteDataSource(
         client,
-      ).sendMessage(' Stock? ');
+      ).sendMessage(' Stock? ', 'conversation-123');
 
       expect(response.summary, 'Stock needs attention.');
       expect(response.insights, ['Low stock']);
       expect(response.recommendations, ['Restock soon.']);
       expect(client.lastPath, '/api/chat');
-      expect(client.lastData, <String, String>{'query': 'Stock?'});
+      expect(client.lastData, <String, String>{
+        'conversationId': 'conversation-123',
+        'query': 'Stock?',
+      });
       final domain = response.toDomain();
       expect(domain.summary, response.summary);
       expect(domain.insights, response.insights);
@@ -41,7 +44,7 @@ void main() {
     test('handles absent or empty lists: $lists', () async {
       final response = await ChatRemoteDataSource(
         _RecordingApiClient({'summary': 'No issues.', ...lists}),
-      ).sendMessage('Status?');
+      ).sendMessage('Status?', 'conversation-123');
       expect(response.insights, isEmpty);
       expect(response.recommendations, isEmpty);
     });
@@ -70,7 +73,7 @@ void main() {
         _RecordingApiClient(malformedPayloads[i]),
       );
       await expectLater(
-        source.sendMessage('Status?'),
+        source.sendMessage('Status?', 'conversation-123'),
         throwsA(
           isA<ApiException>().having(
             (e) => e.type,
@@ -87,7 +90,7 @@ void main() {
       _RecordingApiClient({'summary': ' \n '}),
     );
     await expectLater(
-      source.sendMessage('Status?'),
+      source.sendMessage('Status?', 'conversation-123'),
       throwsA(
         isA<ApiException>().having(
           (e) => e.type,
@@ -101,7 +104,7 @@ void main() {
   test('empty query never reaches the API', () async {
     final client = _RecordingApiClient(null);
     await expectLater(
-      ChatRemoteDataSource(client).sendMessage('  '),
+      ChatRemoteDataSource(client).sendMessage('  ', 'conversation-123'),
       throwsA(isA<ApiException>()),
     );
     expect(client.lastPath, isNull);
@@ -138,7 +141,7 @@ void main() {
         ),
       );
       await expectLater(
-        source.sendMessage('Stock?'),
+        source.sendMessage('Stock?', 'conversation-123'),
         throwsA(
           isA<ApiException>()
               .having((e) => e.type, 'type', failure.$2)

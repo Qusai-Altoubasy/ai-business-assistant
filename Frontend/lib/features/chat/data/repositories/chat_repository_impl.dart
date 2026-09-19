@@ -8,6 +8,9 @@ class ChatRepositoryImpl implements ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message) async =>
-      (await _remoteDataSource.sendMessage(message)).toDomain();
+  Future<BusinessAnalysis> sendMessage(
+    String message,
+    String conversationId,
+  ) async =>
+      (await _remoteDataSource.sendMessage(message, conversationId)).toDomain();
 }

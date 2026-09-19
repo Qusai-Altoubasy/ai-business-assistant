@@ -22,6 +22,14 @@ void main() {
       await controller.sendMessage('  Hello AI  ');
 
       expect(repository.messages, ['Hello AI']);
+      expect(
+        repository.conversationIds.single,
+        matches(
+          RegExp(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+          ),
+        ),
+      );
       controller.dispose();
     });
 
@@ -87,6 +95,10 @@ void main() {
 
         expect(await controller.retryLast(), isTrue);
         expect(repository.messages, ['Stock?', 'Stock?']);
+        expect(
+          repository.conversationIds.first,
+          repository.conversationIds.last,
+        );
         expect(controller.state.messages, hasLength(2));
         expect(controller.state.messages.first.content, 'Stock?');
         expect(controller.state.messages.last.analysis, same(_analysis));
@@ -97,11 +109,10 @@ void main() {
     );
 
     test('summary-only response and reset keep local state behavior', () async {
-      final controller = ChatController(
-        _FakeChatRepository(
-          response: const BusinessAnalysis(summary: 'No issues.'),
-        ),
+      final repository = _FakeChatRepository(
+        response: const BusinessAnalysis(summary: 'No issues.'),
       );
+      final controller = ChatController(repository);
       addTearDown(controller.dispose);
       await controller.sendMessage('Status?');
       expect(controller.state.messages.last.analysis!.insights, isEmpty);
@@ -110,6 +121,12 @@ void main() {
       expect(controller.state.messages, isEmpty);
       expect(controller.state.isSubmitting, isFalse);
       expect(controller.state.lastFailedPrompt, isNull);
+      await controller.sendMessage('Status again?');
+      expect(repository.conversationIds, hasLength(2));
+      expect(
+        repository.conversationIds.first,
+        isNot(repository.conversationIds.last),
+      );
     });
 
     test('empty message is not submitted', () async {
@@ -143,6 +160,20 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('reset ignores the response from the previous conversation', () async {
+      final repository = _PendingChatRepository();
+      final controller = ChatController(repository);
+      addTearDown(controller.dispose);
+
+      final pending = controller.sendMessage('Old question');
+      controller.resetChat();
+      repository.complete(_analysis);
+      await pending;
+
+      expect(controller.state.messages, isEmpty);
+      expect(controller.state.isSubmitting, isFalse);
+    });
   });
 }
 
@@ -152,10 +183,15 @@ class _FakeChatRepository implements ChatRepository {
   final BusinessAnalysis? response;
   Object? error;
   final List<String> messages = [];
+  final List<String> conversationIds = [];
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message) async {
+  Future<BusinessAnalysis> sendMessage(
+    String message,
+    String conversationId,
+  ) async {
     messages.add(message);
+    conversationIds.add(conversationId);
     if (error != null) throw error!;
     return response!;
   }
@@ -166,7 +202,7 @@ class _PendingChatRepository implements ChatRepository {
   final _completer = Completer<BusinessAnalysis>();
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message) {
+  Future<BusinessAnalysis> sendMessage(String message, String conversationId) {
     messages.add(message);
     return _completer.future;
   }

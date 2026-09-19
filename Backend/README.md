@@ -105,7 +105,7 @@ Client JSON query
   → JSON response
 ```
 
-`ChatRequestDTO` contains only `query`. No conversation history is passed to the AI service. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
+`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 complete user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Complete user and assistant history is append-only in PostgreSQL and is not deleted when turns leave the active window. The service is `@ApplicationScoped` so its memory is not cleared at the end of each HTTP request. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
 
 ### Registered Tools
 
@@ -239,18 +239,18 @@ java -jar target/quarkus-app/quarkus-run.jar
 
 Stop dev mode before starting the packaged application. Keep the entire `target/quarkus-app/` directory when distributing the build.
 
-The current suite contains eight tests: one structured chat endpoint test, four persistence tests, and three customer-tool tests. The endpoint test substitutes `BusinessAnalysisService` and verifies query forwarding and all three analysis fields. Persistence tests verify migration history, seeded repository reads, historical order totals, relationships, and generated IDs. Customer-tool tests call the tool directly against PostgreSQL and verify seeded totals, average rounding, zero orders, and missing-customer behavior. Tests do not call Gemini or evaluate model tool selection/response quality. Use a development database with the original seed data. Test inserts roll back, but identity sequences advance.
+The suite includes chat endpoint, business-persistence, conversation-memory persistence, customer-tool, and turn-aware memory tests. The turn-aware tests verify whole-turn eviction, system-message retention, and rejection of a persisted window that starts mid-turn. Tests do not call Gemini or evaluate model tool selection/response quality. Database tests require a development database with the original seed data. Test inserts roll back, but identity sequences still advance.
 
 ## API
 
-The endpoint consumes and produces `application/json` and accepts `{"query":"..."}`. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
+The endpoint consumes and produces `application/json` and accepts `{"conversationId":"...","query":"..."}`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
 
 ### `POST /api/chat`
 
 ```bash
 curl http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
-  --data '{"query":"Do we have any products that need restocking?"}'
+  --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Do we have any products that need restocking?"}'
 ```
 
 ```json
@@ -268,7 +268,7 @@ For customer analysis, use the same endpoint and contract:
 ```bash
 curl http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
-  --data '{"query":"What are the purchase statistics for customer ID 1?"}'
+  --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"What are the purchase statistics for customer ID 1?"}'
 ```
 
 Customer statistics DTOs are internal tool results; they are not new HTTP response fields. The system prompt also instructs out-of-scope requests to use `BusinessAnalysisDTO`, with empty insights and one suggestion to ask about the supported business domains.
@@ -277,7 +277,7 @@ Customer statistics DTOs are internal tool results; they are not new HTTP respon
 
 - Tools are read-only. Policy/document retrieval, write operations, units-sold analysis, and margins are not implemented.
 - Customer statistics are lifetime aggregates of recorded orders for one ID, without date filtering, customer search/ranking, segmentation, or predictive analysis.
-- No server-side conversation memory or persisted chat history.
+- Conversation history and the active 10-turn memory window are persisted in PostgreSQL. A backend restart restores the active window for the same conversation ID. The full history is retained separately and is not loaded wholesale into the LLM context.
 - No embeddings, pgvector extension, semantic search, or RAG.
 - No business CRUD endpoints or order/inventory business logic.
 - No application authentication, explicit request validation, or custom API error contract.

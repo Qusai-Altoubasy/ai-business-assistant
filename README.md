@@ -15,7 +15,7 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 
 The current implementation demonstrates a structured chat API, declarative AI Services, a resource-based business prompt, temperature experimentation, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
 
-The Flutter client sends individual queries to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; conversation history is not sent to the backend or persisted. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
+The Flutter client sends queries and a stable `conversationId` to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages live in Riverpod state; the backend persists full history and retains the latest 10 complete user turns as active context. New Chat creates a new ID. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
 
 ### Available Business Data
 
@@ -27,7 +27,7 @@ The Flutter client sends individual queries to `POST /api/chat` and renders the 
 | Customer purchase statistics | `CustomerTools.getCustomerStatistics(customerId)` | Returns the customer's ID/name, order count, total spent, and average order value across all recorded orders. A missing customer is rejected; an existing customer with no orders has zero totals. |
 | Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
 
-The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval, RAG, and conversation memory are not implemented.
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval and RAG are not implemented. PostgreSQL restores the active conversation memory after a backend restart.
 
 ### Prompting
 
@@ -196,7 +196,7 @@ On backend startup, Flyway applies `V1__create_business_schema.sql` and `V2__see
 
 ## API
 
-The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a single string field, `query`.
+The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a required UUID `conversationId` and a `query` string. Reuse the ID for follow-up questions and use a new UUID for a new chat.
 
 ### `POST /api/chat`
 
@@ -205,7 +205,7 @@ Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a str
 ```bash
 curl --request POST http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
-  --data '{"query":"Do we have any products that need restocking?"}'
+  --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Do we have any products that need restocking?"}'
 ```
 
 Illustrative response:
@@ -235,7 +235,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint test substitutes `BusinessAnalysisService` and verifies all three response fields and query forwarding. Four persistence tests verify both migrations, seeded repository reads, order totals, relationships, and generated IDs after seeding. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
+The endpoint tests substitute `BusinessAnalysisService` and verify all three response fields, ID/query forwarding, and rejection of a missing ID. Persistence tests verify Flyway migrations, seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
 
 For the frontend, from the repository root:
 
