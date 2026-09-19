@@ -51,8 +51,10 @@ docker compose up --build
 Open the frontend at <http://127.0.0.1:3000>. The backend chat endpoint is
 `POST http://127.0.0.1:8080/api/chat`.
 
-It accepts `{"query":"..."}` and returns `summary`, `insights`, and
-`recommendations`, which Flutter renders as analysis sections. Sales summaries,
+It accepts `{"conversationId":"<UUID>","query":"..."}` and returns `summary`,
+`insights`, and `recommendations`, which Flutter renders as analysis sections.
+Flutter reuses the UUID for follow-up questions and creates a new one for New
+Chat. Sales summaries,
 low-stock products, product stock, customer purchase statistics, and relative-date
 queries are available through this chat endpoint. The backend uses read-only
 tools internally; the frontend receives only the final analysis.
@@ -81,8 +83,9 @@ It survives container recreation and `down`;
 only when this volume is empty, so changing `POSTGRES_*` does not update an
 existing database.
 
-Flyway runs V1 (four business tables) and V2 (10 products, 5 customers, 12 orders,
-24 order items) on backend startup. Hibernate validates the resulting schema.
+Flyway runs V1 (four business tables), V2 (10 products, 5 customers, 12 orders,
+24 order items), and V3 (conversation history and active chat memory tables) on
+backend startup. Hibernate validates the resulting schema.
 Flyway creates tables inside the database, not the database itself.
 
 For a backend running through Maven, start just the database:

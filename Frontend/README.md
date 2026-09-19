@@ -51,15 +51,17 @@ address reachable from that device instead of `localhost`.
   products, stock for a product ID, and last month's sales. Selecting one fills
   the composer; Send or Enter submits it through the same chat flow.
 - Enter sends a message; Shift+Enter inserts a newline.
-- Trims messages and sends them with a stable conversation ID as JSON to `POST /api/chat`.
+- Trims messages and sends them with a stable UUID v4 conversation ID as JSON to `POST /api/chat`. Follow-up requests reuse that ID.
 - Renders structured `summary`, `insights`, and `recommendations` inside the
   existing assistant message. Empty list sections are hidden.
 - Converts timeouts, network failures, unsuccessful responses, malformed
   payloads, and empty summaries into safe inline errors with Retry.
 - New Chat resets local state, creates a new UUID v4 conversation ID, and clears the composer.
 - The sidebar lists example questions, not persisted conversation history.
-- Business data, sales, and inventory analysis are marked available. Semantic
-  search, persisted conversation history, citations, and evaluation remain planned.
+- Business data, sales, and inventory analysis are marked available. The backend
+  persists conversation history and a bounded AI context, but the frontend has
+  no history list or resume flow. Semantic search, citations, and evaluation
+  remain planned.
 
 The backend is the authority for available data: it can read low-stock products,
 stock for a product ID, recorded revenue/order counts in an inclusive date

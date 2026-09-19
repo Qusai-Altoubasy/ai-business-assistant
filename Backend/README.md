@@ -2,7 +2,7 @@
 
 The Quarkus backend for an educational AI Business Assistant. It exposes one Gemini-backed structured chat endpoint and reads business data from PostgreSQL.
 
-Resource-based prompting, structured output, PostgreSQL, and read-only inventory, sales, customer statistics, and current-date tools are implemented. Memory, Embeddings, pgvector, RAG, and further reliability/evaluation remain future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
+Resource-based prompting, structured output, PostgreSQL-backed conversation history and turn-aware memory, and read-only inventory, sales, customer statistics, and current-date tools are implemented. Embeddings, pgvector, RAG, and further reliability/evaluation remain future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
 
 ## Tech Stack
 
@@ -18,12 +18,13 @@ Quarkus and LangChain4j dependencies use the BOMs in [pom.xml](pom.xml). The Pos
 ## Current Implemented Features
 
 - `POST /api/chat` returns `BusinessAnalysisDTO` with `summary`, `insights`, and `recommendations`.
-- `BusinessAnalysisService` uses `@RegisterAiService`, `@SystemMessage`, and `@UserMessage`.
+- `BusinessAnalysisService` uses `@RegisterAiService`, `@SystemMessage`, `@UserMessage`, and `@MemoryId` to keep conversations separate.
+- PostgreSQL stores successful user/assistant exchanges and the active context window. The window retains the latest 10 whole user turns and the system message.
 - Inventory tools read low-stock products and stock for an individual product ID through `ProductRepository`.
 - Sales tools aggregate recorded order amounts and order count for an inclusive date range through `OrderRepository`.
 - Customer tools read customer identity through `CustomerRepository` and aggregate all of that customer's orders through `OrderRepository`, including average order value.
 - The current-date tool supports relative-date questions using the backend's `LocalDate.now()`.
-- Four business entities and four `PanacheRepository<Entity>` implementations provide database access.
+- Four business entities and their Panache repositories provide business-data access; chat entities and repositories store conversations, messages, and memory state.
 - Flyway creates the schema and loads deterministic business data; Hibernate validates the mappings at startup.
 - Focused request and tool logs record AI boundaries, tool invocation and result counts, timings, and meaningful failures without logging prompt contents.
 
@@ -49,9 +50,11 @@ Backend/
 │   │   ├── ChatResource.java
 │   │   ├── ai/
 │   │   │   └── BusinessAnalysisService.java
-│   │   └── dto/
-│   │       ├── ChatRequestDTO.java
-│   │       └── BusinessAnalysisDTO.java
+│   │   ├── dto/
+│   │   │   ├── ChatRequestDTO.java
+│   │   │   └── BusinessAnalysisDTO.java
+│   │   ├── history/          # Conversations and complete user/assistant history
+│   │   └── memory/           # Turn-aware window and PostgreSQL backing store
 │   ├── product/
 │   │   ├── Product.java
 │   │   ├── ProductRepository.java
@@ -77,9 +80,11 @@ Backend/
 │   ├── prompts/business-analysis-system.txt
 │   └── db/migration/
 │       ├── V1__create_business_schema.sql
-│       └── V2__seed_business_data.sql
+│       ├── V2__seed_business_data.sql
+│       └── V3__add_persistent_chat_history.sql
 ├── src/test/java/com/aibusinessassistant/
 │   ├── chat/ChatResourceTest.java
+│   ├── chat/memory/          # Turn-aware and persistence tests
 │   ├── customer/CustomerToolsTest.java
 │   └── order/BusinessPersistenceTest.java
 ├── .mvn/wrapper/maven-wrapper.properties
@@ -94,18 +99,20 @@ Packages group code by business feature. The chat resource, AI interface, and DT
 ### Request Flow
 
 ```text
-Client JSON query
+Client JSON conversationId + query
   → ChatResource
-  → BusinessAnalysisService
+  → BusinessAnalysisService (@MemoryId)
+      ↔ TurnAwareChatMemory → PostgresChatMemoryStore → PostgreSQL chat_memory_state
   → Google Gemini
       ↕ when business data is needed
     InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
     CommonTools → current application date
   → BusinessAnalysisDTO
+  → ChatResource → ConversationHistoryService → PostgreSQL chat_messages
   → JSON response
 ```
 
-`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 complete user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Complete user and assistant history is append-only in PostgreSQL and is not deleted when turns leave the active window. The service is `@ApplicationScoped` so its memory is not cleared at the end of each HTTP request. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
+`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 whole user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Successful user and assistant exchanges are stored separately in `chat_messages` and are not deleted when turns leave the active window. The AI service is `@ApplicationScoped`, and the PostgreSQL store supplies its memory across requests. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
 
 ### Registered Tools
 
@@ -135,8 +142,11 @@ Compose configures the official `postgres:18` image. Database access uses blocki
 | `Customer` / `customers` | `id`, `name`, unique `email` |
 | `Order` / `orders` | `id`, `customer` → `Customer`, `orderDate`, `totalAmount` |
 | `OrderItem` / `order_items` | `id`, `order` → `Order`, `product` → `Product`, `quantity`, `price` |
+| `Conversation` / `conversations` | UUID `id`, creation and update timestamps |
+| `ConversationMessage` / `chat_messages` | Generated `id`, `conversation` → `Conversation`, `role` (`USER` or `ASSISTANT`), `content`, creation timestamp |
+| `ChatMemoryState` / `chat_memory_state` | `conversationId` UUID primary key referencing `conversations`, serialized active messages, update timestamp |
 
-IDs are generated `Long` values using PostgreSQL identity columns. Monetary values use `BigDecimal` mapped to `NUMERIC(12,2)`, and order dates use `LocalDate`. Database columns use snake_case. Relationships are required, lazy, unidirectional many-to-one mappings. There are no reverse collections or cascade operations configured.
+Business entity IDs and `chat_messages.id` are generated `Long` values using PostgreSQL identity columns; conversation IDs are client-generated UUIDs. Monetary values use `BigDecimal` mapped to `NUMERIC(12,2)`, and order dates use `LocalDate`. Database columns use snake_case. Business relationships are required, lazy, unidirectional many-to-one mappings. `chat_messages` also has a required many-to-one conversation mapping; `chat_memory_state` references its conversation through the UUID column. There are no reverse collections or cascade operations configured.
 
 An order item's `price` is the unit price at purchase, which may differ from the product's current price. Seeded order totals match the sum of their line items; no application logic currently calculates or maintains those totals.
 
@@ -158,6 +168,7 @@ PostgreSQL creates the database using `POSTGRES_DB` on first initialization. Fly
 | --- | --- |
 | [V1__create_business_schema.sql](src/main/resources/db/migration/V1__create_business_schema.sql) | Creates the four tables, identity keys, foreign keys, required columns, unique customer emails, and indexes for relationship/date lookups. |
 | [V2__seed_business_data.sql](src/main/resources/db/migration/V2__seed_business_data.sql) | Inserts 10 products, 5 customers, 12 orders, and 24 order items; advances identity sequences past the explicit seed IDs. |
+| [V3__add_persistent_chat_history.sql](src/main/resources/db/migration/V3__add_persistent_chat_history.sql) | Creates conversations, the append-only user/assistant history table, and the active chat-memory state table. The history role has a database check constraint. |
 
 The fictional seed data spans January–March 2026, includes repeat customers and products below minimum stock, and supports the current sales, inventory, and customer queries. Customer 1 (Maya Reed) has three seeded orders totaling `483.00`, averaging `161.00`. Relative-date questions use the actual backend date, so "last month" may fall outside the seeded period and return no sales. Flyway tracks applied migrations in `flyway_schema_history`. Add new migrations for later changes instead of editing migrations already applied to a database.
 
@@ -187,6 +198,8 @@ The backend reads the following variables through [application.properties](src/m
 | `FRONTEND_ORIGIN` | Allowed browser CORS origin | `http://127.0.0.1:3000` |
 
 CORS allows `POST`. The test profile provides non-secret Gemini placeholders; database credentials still come from the environment.
+
+`app.chat.memory.max-turns=10` in `application.properties` controls the number of whole user turns kept in the active context. Older turns remain in `chat_messages` but are no longer sent to the model.
 
 Compose reads `deploy/.env` and maps `POSTGRES_USER` to `DB_USERNAME`, `POSTGRES_PASSWORD` to `DB_PASSWORD`, and `POSTGRES_DB` into `jdbc:postgresql://ai-business-assistant-postgres:5432/<database>`. `POSTGRES_PORT` controls the host database port; it does not change the internal port. `BACKEND_PORT` controls the host API port. Exported shell variables take precedence over Compose's env-file values.
 
@@ -277,19 +290,19 @@ Customer statistics DTOs are internal tool results; they are not new HTTP respon
 
 - Tools are read-only. Policy/document retrieval, write operations, units-sold analysis, and margins are not implemented.
 - Customer statistics are lifetime aggregates of recorded orders for one ID, without date filtering, customer search/ranking, segmentation, or predictive analysis.
-- Conversation history and the active 10-turn memory window are persisted in PostgreSQL. A backend restart restores the active window for the same conversation ID. The full history is retained separately and is not loaded wholesale into the LLM context.
+- The API has no endpoint to list stored conversations or retrieve their full history for a client. Sending the same conversation ID restores the active AI context after a backend restart.
 - No embeddings, pgvector extension, semantic search, or RAG.
 - No business CRUD endpoints or order/inventory business logic.
-- No application authentication, explicit request validation, or custom API error contract.
+- No application authentication, comprehensive query validation, or custom API error contract. The endpoint rejects a missing or malformed conversation ID.
 - No metrics, distributed tracing, production alerting, or AI response evaluation suite beyond the focused application logs and existing framework setup.
 
 ## Roadmap
 
 This educational progression distinguishes completed work from planned capabilities; planned items are not delivery commitments:
 
-1. **Completed:** PostgreSQL persistence, repositories, migrations, seed data, structured chat, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
+1. **Completed:** PostgreSQL persistence, repositories, migrations, seed data, structured chat, conversation history and turn-aware memory, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
 2. **Next:** Additional explicit read-only business queries beyond the existing tools.
-3. Conversation Memory.
+3. Conversation history retrieval for clients.
 4. Embeddings.
 5. pgvector semantic search.
 6. RAG.
