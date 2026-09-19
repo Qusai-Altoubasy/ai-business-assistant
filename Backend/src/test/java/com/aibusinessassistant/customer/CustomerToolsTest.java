@@ -47,25 +47,25 @@ class CustomerToolsTest {
     @TestTransaction
     void emptyCustomerHasZeroTotalsAndAverageIsRoundedAfterOrdersAreAdded() {
         Customer customer = new Customer();
-        customer.name = "Customer statistics test";
-        customer.email = "statistics-" + UUID.randomUUID() + "@example.com";
+        customer.setName("Customer statistics test");
+        customer.setEmail("statistics-" + UUID.randomUUID() + "@example.com");
         customers.persistAndFlush(customer);
 
-        CustomerStatisticsDTO empty = tools.getCustomerStatistics(customer.id);
+        CustomerStatisticsDTO empty = tools.getCustomerStatistics(customer.getId());
         assertEquals(0, empty.orderCount());
         assertEquals(0, empty.totalSpent().compareTo(BigDecimal.ZERO));
         assertEquals(BigDecimal.ZERO, empty.averageOrderValue());
 
         for (String amount : List.of("1.00", "1.00", "0.00")) {
             Order order = new Order();
-            order.customer = customer;
-            order.orderDate = LocalDate.of(2026, 4, 1);
-            order.totalAmount = new BigDecimal(amount);
+            order.setCustomer(customer);
+            order.setOrderDate(LocalDate.of(2026, 4, 1));
+            order.setTotalAmount(new BigDecimal(amount));
             orders.persist(order);
         }
         orders.flush();
 
-        CustomerStatisticsDTO result = tools.getCustomerStatistics(customer.id);
+        CustomerStatisticsDTO result = tools.getCustomerStatistics(customer.getId());
         assertEquals(3, result.orderCount());
         assertEquals(0, new BigDecimal("2.00").compareTo(result.totalSpent()));
         assertEquals(new BigDecimal("0.67"), result.averageOrderValue());

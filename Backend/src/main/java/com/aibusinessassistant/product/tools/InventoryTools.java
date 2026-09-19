@@ -32,10 +32,10 @@ public class InventoryTools {
             List<LowStockProductDTO> products = productRepository.findLowStockProducts()
                     .stream()
                     .map(product -> new LowStockProductDTO(
-                            product.id,
-                            product.name,
-                            product.stockQuantity,
-                            product.minimumStock
+                            product.getId(),
+                            product.getName(),
+                            product.getStockQuantity(),
+                            product.getMinimumStock()
                     ))
                     .toList();
 

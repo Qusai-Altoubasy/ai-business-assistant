@@ -13,26 +13,36 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "order_items")
 public class OrderItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "order_id", nullable = false)
-    public Order order;
+    private Order order;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
-    public Product product;
+    private Product product;
 
     @Column(name = "quantity", nullable = false)
-    public Integer quantity;
+    private Integer quantity;
 
     @Column(name = "price", nullable = false, precision = 12, scale = 2)
-    public BigDecimal price;
+    private BigDecimal price;
 }

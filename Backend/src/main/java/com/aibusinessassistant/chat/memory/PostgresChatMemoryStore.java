@@ -27,7 +27,7 @@ public class PostgresChatMemoryStore implements ChatMemoryStore {
     @Transactional
     public List<ChatMessage> getMessages(Object memoryId) {
         ChatMemoryState state = states.findById(asConversationId(memoryId));
-        return state == null ? List.of() : ChatMessageDeserializer.messagesFromJson(state.messagesJson);
+        return state == null ? List.of() : ChatMessageDeserializer.messagesFromJson(state.getMessagesJson());
     }
 
     @Override
@@ -43,15 +43,15 @@ public class PostgresChatMemoryStore implements ChatMemoryStore {
 
         if (state == null) {
             state = new ChatMemoryState();
-            state.conversationId = conversationId;
-            state.messagesJson = messagesJson;
-            state.updatedAt = now;
+            state.setConversationId(conversationId);
+            state.setMessagesJson(messagesJson);
+            state.setUpdatedAt(now);
 
             states.persist(state);
             return;
         }
-        state.messagesJson = messagesJson;
-        state.updatedAt = now;
+        state.setMessagesJson(messagesJson);
+        state.setUpdatedAt(now);
     }
 
     @Override

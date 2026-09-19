@@ -81,8 +81,8 @@ class ConversationMemoryPersistenceTest {
         }
 
         assertEquals(12, messages.listByConversationId(conversationId).size());
-        assertEquals(ChatRole.USER, messages.listByConversationId(conversationId).getFirst().role);
-        assertEquals(ChatRole.ASSISTANT, messages.listByConversationId(conversationId).get(1).role);
+        assertEquals(ChatRole.USER, messages.listByConversationId(conversationId).getFirst().getRole());
+        assertEquals(ChatRole.ASSISTANT, messages.listByConversationId(conversationId).get(1).getRole());
         List<ChatMessage> activeMessages = memory(conversationId).messages();
         assertEquals(10, activeMessages.size());
         assertEquals("Context 2", ((UserMessage) activeMessages.getFirst()).singleText());

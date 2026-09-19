@@ -14,22 +14,32 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "orders")
 public class Order {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "customer_id", nullable = false)
-    public Customer customer;
+    private Customer customer;
 
     @Column(name = "order_date", nullable = false)
-    public LocalDate orderDate;
+    private LocalDate orderDate;
 
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
-    public BigDecimal totalAmount;
+    private BigDecimal totalAmount;
 }
