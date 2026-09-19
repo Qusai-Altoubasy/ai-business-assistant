@@ -7,17 +7,27 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "conversations")
 public class Conversation {
 
     @Id
-    public UUID id;
+    private UUID id;
 
     @Column(name = "created_at", nullable = false)
-    public OffsetDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
-    public OffsetDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 }

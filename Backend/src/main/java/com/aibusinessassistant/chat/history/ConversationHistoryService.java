@@ -23,7 +23,7 @@ public class ConversationHistoryService {
     public void recordSuccessfulExchange(UUID conversationId, String query, BusinessAnalysisDTO response) {
         Conversation conversation = findOrCreateConversation(conversationId);
         OffsetDateTime now = OffsetDateTime.now();
-        conversation.updatedAt = now;
+        conversation.setUpdatedAt(now);
 
         persistMessage(conversation, ChatRole.USER, query, now);
         persistMessage(conversation, ChatRole.ASSISTANT, responseJson(response), now);
@@ -38,19 +38,19 @@ public class ConversationHistoryService {
 
         OffsetDateTime now = OffsetDateTime.now();
         conversation = new Conversation();
-        conversation.id = conversationId;
-        conversation.createdAt = now;
-        conversation.updatedAt = now;
+        conversation.setId(conversationId);
+        conversation.setCreatedAt(now);
+        conversation.setUpdatedAt(now);
         conversations.persist(conversation);
         return conversation;
     }
 
     private void persistMessage(Conversation conversation, ChatRole role, String content, OffsetDateTime createdAt) {
         ConversationMessage message = new ConversationMessage();
-        message.conversation = conversation;
-        message.role = role;
-        message.content = content;
-        message.createdAt = createdAt;
+        message.setConversation(conversation);
+        message.setRole(role);
+        message.setContent(content);
+        message.setCreatedAt(createdAt);
         messages.persist(message);
     }
 
