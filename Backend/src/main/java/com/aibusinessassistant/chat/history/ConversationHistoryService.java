@@ -21,12 +21,17 @@ public class ConversationHistoryService {
 
     @Transactional
     public void recordSuccessfulExchange(UUID conversationId, String query, BusinessAnalysisDTO response) {
+        recordSuccessfulTextExchange(conversationId, query, responseJson(response));
+    }
+
+    @Transactional
+    public void recordSuccessfulTextExchange(UUID conversationId, String query, String response) {
         Conversation conversation = findOrCreateConversation(conversationId);
         OffsetDateTime now = OffsetDateTime.now();
         conversation.setUpdatedAt(now);
 
         persistMessage(conversation, ChatRole.USER, query, now);
-        persistMessage(conversation, ChatRole.ASSISTANT, responseJson(response), now);
+        persistMessage(conversation, ChatRole.ASSISTANT, response, now);
     }
 
     @Transactional

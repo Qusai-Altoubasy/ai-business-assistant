@@ -1,7 +1,7 @@
-# Local Docker demo
+# Local Docker deployment
 
 This directory runs the Quarkus backend, Flutter Web frontend, and PostgreSQL 18
-in Docker for local/demo use. All services are published only on `127.0.0.1`.
+in Docker. All services are published only on `127.0.0.1`.
 
 ## Configuration
 
@@ -48,18 +48,22 @@ Build and start all services (the backend waits for PostgreSQL to be healthy):
 docker compose up --build
 ```
 
-Open the frontend at <http://127.0.0.1:3000>. The backend chat endpoint is
-`POST http://127.0.0.1:8080/api/chat`.
+Open the frontend at <http://127.0.0.1:3000>. The backend exposes
+`POST http://127.0.0.1:8080/api/chat` and
+`POST http://127.0.0.1:8080/api/chat/stream`.
 
-It accepts `{"conversationId":"<UUID>","query":"..."}` and returns `summary`,
-`insights`, and `recommendations`, which Flutter renders as analysis sections.
-Flutter reuses the UUID for follow-up questions and creates a new one for New
-Chat. Sales summaries,
+Both accept `{"conversationId":"<UUID>","query":"..."}`. Structured Chat
+returns `summary`, `insights`, and `recommendations` as JSON; Streaming Chat
+returns JSON SSE events that progressively update one assistant message. Nginx
+disables buffering for `/api/` so chunks can reach the browser as they arrive.
+Flutter reuses the UUID for follow-up questions and mode switches, and creates
+a new one for New Chat. Sales summaries,
 low-stock products, product stock, customer purchase statistics, and relative-date
-queries are available through this chat endpoint. The backend uses read-only
-tools internally; the frontend receives only the final analysis.
+queries are available through both endpoints. The backend uses read-only tools;
+Streaming Chat shows temporary tool status without exposing tool arguments or
+results.
 
-Customer statistics are requested through the same composer and endpoint, for
+Customer statistics are requested through the same composer in either mode, for
 example `What are the purchase statistics for customer ID 1?`. They aggregate
 all recorded orders for that customer; no new service, route, or deployment
 variable is required.
@@ -130,6 +134,6 @@ and clear site data for `http://127.0.0.1:3000` before reopening it. Docker buil
 cache and browser cache are separate.
 
 These commands preserve the PostgreSQL volume. Seeded sales cover January–March
-2026; use an explicit period in that range to exercise the sales demo. Questions
+2026; use an explicit period in that range to query the seeded sales. Questions
 such as "last month" use the backend's current date and may have no matching
 orders.

@@ -3,20 +3,21 @@ import 'package:flutter/material.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../controllers/chat_state.dart';
 
 class AppSidebar extends StatelessWidget {
-  const AppSidebar({super.key, required this.onNewChat});
+  const AppSidebar({
+    super.key,
+    required this.onNewChat,
+    required this.mode,
+    required this.onModeChanged,
+    this.isSubmitting = false,
+  });
 
   final VoidCallback onNewChat;
-
-  static const _modules = <(IconData, String, String)>[
-    (Icons.insights_outlined, 'Analytics', 'In chat'),
-    (Icons.dataset_outlined, 'Knowledge Base', 'Planned'),
-    (Icons.storage_outlined, 'Data Sources', 'In chat'),
-    (Icons.handyman_outlined, 'Tools', 'In chat'),
-    (Icons.fact_check_outlined, 'Evaluation', 'Planned'),
-    (Icons.settings_outlined, 'Settings', 'Planned'),
-  ];
+  final ChatMode mode;
+  final ValueChanged<ChatMode> onModeChanged;
+  final bool isSubmitting;
 
   static const _examples = <String>[
     'Monthly Sales Analysis',
@@ -91,14 +92,21 @@ class AppSidebar extends StatelessWidget {
                       label: 'Chat',
                       selected: true,
                     ),
-                    const _SectionLabel('Architecture modules'),
-                    for (final module in _modules)
-                      _NavItem(
-                        icon: module.$1,
-                        label: module.$2,
-                        trailing: _Tag(label: module.$3),
-                        disabled: true,
-                      ),
+                    const _SectionLabel('Chat mode'),
+                    _NavItem(
+                      icon: Icons.view_agenda_outlined,
+                      label: 'Structured Chat',
+                      selected: mode == ChatMode.structured,
+                      disabled: isSubmitting,
+                      onTap: () => onModeChanged(ChatMode.structured),
+                    ),
+                    _NavItem(
+                      icon: Icons.stream_outlined,
+                      label: 'Streaming Chat',
+                      selected: mode == ChatMode.streaming,
+                      disabled: isSubmitting,
+                      onTap: () => onModeChanged(ChatMode.streaming),
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     const _SectionLabel(
                       'Example questions',
@@ -198,52 +206,52 @@ class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
     required this.label,
-    this.trailing,
     this.selected = false,
     this.disabled = false,
     this.compact = false,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
-  final Widget? trailing;
   final bool selected;
   final bool disabled;
   final bool compact;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
       opacity: disabled ? 0.55 : 1,
-      child: Container(
-        height: compact ? 34 : 38,
-        margin: const EdgeInsets.only(bottom: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.surfaceHigh : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: compact ? 16 : 18, color: AppColors.inkMuted),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: selected
-                    ? AppTextStyles.headline.copyWith(fontSize: 14)
-                    : AppTextStyles.bodySmall,
+      child: InkWell(
+        onTap: disabled ? null : onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: compact ? 34 : 38,
+          margin: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.surfaceHigh : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: compact ? 16 : 18, color: AppColors.inkMuted),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: selected
+                      ? AppTextStyles.headline.copyWith(fontSize: 14)
+                      : AppTextStyles.bodySmall,
+                ),
               ),
-            ),
-            ...switch (trailing) {
-              final Widget item => [item],
-              null => const <Widget>[],
-            },
-            if (selected)
-              const Icon(Icons.circle, size: 8, color: AppColors.primary),
-          ],
+              if (selected)
+                const Icon(Icons.circle, size: 8, color: AppColors.primary),
+            ],
+          ),
         ),
       ),
     );

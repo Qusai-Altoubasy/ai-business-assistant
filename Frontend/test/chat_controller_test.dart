@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:ai_business_assistant/core/network/api_exception.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/business_analysis.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_state.dart';
 import 'package:ai_business_assistant/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +16,162 @@ const _analysis = BusinessAnalysis(
 );
 
 void main() {
+  group('Streaming mode', () {
+    test(
+      'updates one bubble progressively, displays tool progress and finalizes on DONE',
+      () async {
+        final repository = _StreamingRepository();
+        final controller = ChatController(repository)
+          ..setMode(ChatMode.streaming);
+        addTearDown(controller.dispose);
+        final pending = controller.sendMessage('Inventory?');
+        await _flush();
+        final assistantId = controller.state.messages.last.id;
+        expect(
+          controller.state.messages.last.progressLabel,
+          'Waiting for response…',
+        );
+        expect(await controller.sendMessage('Duplicate'), isFalse);
+        controller.setMode(ChatMode.structured);
+        expect(controller.state.mode, ChatMode.streaming);
+        repository.streams.single.add(
+          const ChatStreamEvent(
+            StreamEventType.toolStarted,
+            'getLowStockProducts',
+          ),
+        );
+        await _flush();
+        expect(
+          controller.state.messages.last.progressLabel,
+          'Checking inventory…',
+        );
+        repository.streams.single.add(
+          const ChatStreamEvent(
+            StreamEventType.toolCompleted,
+            'getLowStockProducts',
+          ),
+        );
+        await _flush();
+        expect(
+          controller.state.messages.last.progressLabel,
+          'Business data retrieved…',
+        );
+        repository.streams.single.add(
+          const ChatStreamEvent(StreamEventType.chunk, 'Hello'),
+        );
+        await _flush();
+        expect(controller.state.messages.last.content, 'Hello');
+        expect(controller.state.isSubmitting, isTrue);
+        repository.streams.single.add(
+          const ChatStreamEvent(StreamEventType.chunk, ' world'),
+        );
+        await _flush();
+        expect(controller.state.messages, hasLength(2));
+        expect(controller.state.messages.last.id, assistantId);
+        expect(controller.state.messages.last.content, 'Hello world');
+        repository.streams.single.add(
+          const ChatStreamEvent(StreamEventType.done, null),
+        );
+        await pending;
+        expect(controller.state.messages.last.status, MessageStatus.success);
+        expect(controller.state.messages.last.progressLabel, isNull);
+        expect(controller.state.isSubmitting, isFalse);
+        controller.setMode(ChatMode.structured);
+        await controller.sendMessage('Follow-up');
+        expect(repository.modes, [ChatMode.streaming, ChatMode.structured]);
+        expect(repository.ids.first, repository.ids.last);
+        expect(controller.state.messages, hasLength(4));
+      },
+    );
+
+    test(
+      'ERROR preserves partial text and enables a retry without DONE',
+      () async {
+        final repository = _StreamingRepository();
+        final controller = ChatController(repository)
+          ..setMode(ChatMode.streaming);
+        addTearDown(controller.dispose);
+        final pending = controller.sendMessage('Question');
+        await _flush();
+        repository.streams.single
+          ..add(const ChatStreamEvent(StreamEventType.chunk, 'Partial text'))
+          ..add(
+            const ChatStreamEvent(
+              StreamEventType.error,
+              'Unable to complete the streaming request.',
+            ),
+          );
+        await pending;
+        expect(controller.state.messages.last.content, 'Partial text');
+        expect(
+          controller.state.messages.last.error,
+          'Unable to complete the streaming request.',
+        );
+        expect(controller.state.messages.last.status, MessageStatus.error);
+        expect(controller.state.messages.last.progressLabel, isNull);
+        expect(controller.state.isSubmitting, isFalse);
+        final retry = controller.retryLast();
+        await _flush();
+        repository.streams.last.add(
+          const ChatStreamEvent(StreamEventType.done, null),
+        );
+        await retry;
+        expect(controller.state.messages, hasLength(2));
+        expect(repository.ids.first, repository.ids.last);
+      },
+    );
+
+    test('EOF without DONE is an interrupted response', () async {
+      final repository = _StreamingRepository();
+      final controller = ChatController(repository)
+        ..setMode(ChatMode.streaming);
+      addTearDown(controller.dispose);
+      final pending = controller.sendMessage('Question');
+      await _flush();
+      repository.streams.single.add(
+        const ChatStreamEvent(StreamEventType.chunk, 'Partial'),
+      );
+      await repository.streams.single.close();
+      await pending;
+      expect(controller.state.messages.last.status, MessageStatus.error);
+      expect(controller.state.messages.last.content, 'Partial');
+      expect(controller.state.isSubmitting, isFalse);
+    });
+
+    test(
+      'New Chat cancels the stream, changes UUID and preserves mode',
+      () async {
+        final repository = _StreamingRepository();
+        final controller = ChatController(repository)
+          ..setMode(ChatMode.streaming);
+        addTearDown(controller.dispose);
+        final pending = controller.sendMessage('Old question');
+        await _flush();
+        controller.resetChat();
+        await pending;
+        expect(controller.state.messages, isEmpty);
+        expect(controller.state.mode, ChatMode.streaming);
+        final next = controller.sendMessage('New question');
+        await _flush();
+        expect(repository.ids.first, isNot(repository.ids.last));
+        repository.streams.last.add(
+          const ChatStreamEvent(StreamEventType.done, null),
+        );
+        await next;
+      },
+    );
+
+    test('disposal cancels streaming and ignores late completion', () async {
+      final repository = _StreamingRepository();
+      final controller = ChatController(repository)
+        ..setMode(ChatMode.streaming);
+      final pending = controller.sendMessage('Question');
+      await _flush();
+      controller.dispose();
+      await pending;
+      expect(repository.streams.single.isClosed, isTrue);
+    });
+  });
   group('ChatController', () {
     test('sends a normalized message through the repository', () async {
       final repository = _FakeChatRepository(response: _analysis);
@@ -186,6 +344,13 @@ class _FakeChatRepository implements ChatRepository {
   final List<String> conversationIds = [];
 
   @override
+  Stream<ChatStreamEvent> streamMessage(
+    String message,
+    String conversationId, {
+    Future<void>? abortTrigger,
+  }) => throw UnimplementedError();
+
+  @override
   Future<BusinessAnalysis> sendMessage(
     String message,
     String conversationId,
@@ -202,10 +367,56 @@ class _PendingChatRepository implements ChatRepository {
   final _completer = Completer<BusinessAnalysis>();
 
   @override
+  Stream<ChatStreamEvent> streamMessage(
+    String message,
+    String conversationId, {
+    Future<void>? abortTrigger,
+  }) => throw UnimplementedError();
+
+  @override
   Future<BusinessAnalysis> sendMessage(String message, String conversationId) {
     messages.add(message);
     return _completer.future;
   }
 
   void complete(BusinessAnalysis value) => _completer.complete(value);
+}
+
+Future<void> _flush() => Future<void>.delayed(Duration.zero);
+
+class _StreamingRepository implements ChatRepository {
+  final ids = <String>[];
+  final modes = <ChatMode>[];
+  final streams = <StreamController<ChatStreamEvent>>[];
+
+  @override
+  Future<BusinessAnalysis> sendMessage(
+    String message,
+    String conversationId,
+  ) async {
+    ids.add(conversationId);
+    modes.add(ChatMode.structured);
+    return _analysis;
+  }
+
+  @override
+  Stream<ChatStreamEvent> streamMessage(
+    String message,
+    String conversationId, {
+    Future<void>? abortTrigger,
+  }) {
+    ids.add(conversationId);
+    modes.add(ChatMode.streaming);
+    final events = StreamController<ChatStreamEvent>();
+    streams.add(events);
+    abortTrigger?.then((_) {
+      if (!events.isClosed) {
+        events.addError(
+          const ApiException(ApiFailureType.network, 'Cancelled'),
+        );
+        events.close();
+      }
+    });
+    return events.stream;
+  }
 }

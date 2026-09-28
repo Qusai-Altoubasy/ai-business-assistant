@@ -15,12 +15,14 @@ final appConfigProvider = Provider<AppConfig>(
 
 final dioProvider = Provider<Dio>((ref) => Dio());
 
-final apiClientProvider = Provider<ApiClient>(
-  (ref) => ApiClient(
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final client = ApiClient(
     config: ref.watch(appConfigProvider),
     dio: ref.watch(dioProvider),
-  ),
-);
+  );
+  ref.onDispose(client.close);
+  return client;
+});
 
 final chatRemoteDataSourceProvider = Provider<ChatRemoteDataSource>(
   (ref) => ChatRemoteDataSource(ref.watch(apiClientProvider)),
@@ -30,6 +32,7 @@ final chatRepositoryProvider = Provider<ChatRepository>(
   (ref) => ChatRepositoryImpl(ref.watch(chatRemoteDataSourceProvider)),
 );
 
-final chatControllerProvider = StateNotifierProvider<ChatController, ChatState>(
-  (ref) => ChatController(ref.watch(chatRepositoryProvider)),
-);
+final chatControllerProvider =
+    StateNotifierProvider.autoDispose<ChatController, ChatState>(
+      (ref) => ChatController(ref.watch(chatRepositoryProvider)),
+    );

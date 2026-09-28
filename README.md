@@ -1,6 +1,6 @@
 # AI Business Assistant
 
-A learning-focused AI Business Assistant that evolves incrementally, applying practical GenAI concepts in a Quarkus backend with a simple Flutter client.
+AI Business Assistant with a Quarkus backend, PostgreSQL business data, and a Flutter client that supports structured and streaming chat.
 
 ## Tech Stack
 
@@ -8,14 +8,14 @@ A learning-focused AI Business Assistant that evolves incrementally, applying pr
 - LangChain4j AI Services with Google Gemini Developer API
 - Maven Wrapper
 - PostgreSQL 18, Hibernate ORM with Panache, and Flyway
-- Flutter with Riverpod and Dio
+- Flutter with Riverpod, Dio for structured requests, and `http` for Web streaming
 - Docker / Docker Compose; Nginx serves the containerized Flutter Web client
 
-## Current Learning Stage
+## Current Features
 
-The current implementation demonstrates a structured chat API, declarative AI Services, a resource-based business prompt, temperature experimentation, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
+The backend exposes structured JSON at `POST /api/chat` and JSON SSE events at `POST /api/chat/stream`. Both use the same AI service, resource-based business prompt, conversation memory, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
 
-The Flutter client sends queries and a stable UUID `conversationId` to `POST /api/chat` and renders the `BusinessAnalysisDTO` response as summary, insights, and recommendations. It supports editable suggested prompts, inline errors with retry, and resetting the local chat. Messages displayed in the current tab live in Riverpod state; the backend persists successful user/assistant exchanges and retains the latest 10 whole user turns as active AI context. New Chat creates a new ID. Sales, inventory, customer statistics, and business-data capabilities are available through chat; independent sidebar screens remain placeholders, and the sidebar lists example questions rather than stored conversations.
+The Flutter client offers Structured Chat and Streaming Chat in the sidebar. Structured Chat renders the `BusinessAnalysisDTO` summary, insights, and recommendations. Streaming Chat updates one assistant message as `CHUNK` events arrive and shows temporary tool progress; `DONE` finishes the response, while `ERROR` shows a safe retryable error and preserves partial text. Both modes share one screen, editable suggested prompts, and a stable UUID `conversationId`. Messages displayed in the current tab live in Riverpod state; the backend persists successful user/assistant exchanges and retains the latest 10 whole user turns as active AI context. Mode switches preserve the conversation ID; New Chat creates a new ID, clears the UI, and keeps the selected mode. The sidebar lists chat modes and example-question labels rather than stored conversations.
 
 ### Available Business Data
 
@@ -32,11 +32,10 @@ The seed data covers January–March 2026. A question about last month uses the 
 ### Prompting
 
 - `@SystemMessage(fromResource = "prompts/business-analysis-system.txt")` loads the assistant's role and instructions from [the backend prompt](Backend/src/main/resources/prompts/business-analysis-system.txt); `@UserMessage` supplies the query.
-- The current service prompt is zero-shot. One-shot / few-shot prompting remains an experimentation topic.
-- Temperature is currently `0.1` in `application.properties` for experimentation.
-- Structured output maps business analysis to `BusinessAnalysisDTO`.
+- The current service prompt is zero-shot, and the chat-model temperature is `0.1` in `application.properties`.
+- Structured requests map business analysis to `BusinessAnalysisDTO`; streaming requests return plain-text chunks in JSON SSE events.
 - The prompt allows general business concepts within the supported inventory, products, sales, orders, and customers domains; company-specific questions use available tools as needed.
-- Unrelated questions are instructed to return a structured out-of-scope response: a brief summary, empty insights, and one suggestion to ask a supported business question.
+- Unrelated questions are instructed to receive an out-of-scope response. In Structured Chat that means a brief summary, empty insights, and one suggestion to ask a supported business question.
 - The prompt asks the model not to invent business data, classifications, trends, or customer segments without supporting evidence. Optional suggestions must be labeled as possibilities. These instructions do not guarantee factual accuracy and are not a separate API validation layer.
 
 ## Architecture
@@ -48,19 +47,19 @@ Flutter / HTTP client
   ↓
 Quarkus REST API (ChatResource)
   ↓
-LangChain4j AI Service (BusinessAnalysisService with @MemoryId)
+ChatService → LangChain4j AI Service (BusinessAnalysisService with @MemoryId)
   ↔ TurnAwareChatMemory → PostgresChatMemoryStore → chat_memory_state
   ↓
 Google Gemini ↔ InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
               ↔ CommonTools → current application date
   ↓
-BusinessAnalysisDTO → ConversationHistoryService → chat_messages
-                    → JSON → Flutter analysis sections
+BusinessAnalysisDTO or accumulated response text → ConversationHistoryService → chat_messages
+BusinessAnalysisDTO or mapped ChatEvent values → JSON sections or SSE → Flutter chat
 ```
 
 The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, request/analysis DTOs, conversation history, and chat memory belong to `chat`. Inventory, sales, and customer tools live with their business features; the shared current-date tool lives in `common.tools`. System instructions live under `src/main/resources/prompts` and are packaged with the backend.
 
-There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter consumes only the final analysis DTO and does not receive tool execution details.
+There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter receives the final analysis DTO in Structured Chat; Streaming Chat receives text chunks and tool names as SSE events, not tool arguments, results, or model thinking.
 
 ## Project Structure
 
@@ -74,9 +73,10 @@ ai-business-assistant/
 Backend/
 ├── src/main/java/com/aibusinessassistant/chat/
 │   ├── ChatResource.java
+│   ├── ChatService.java
 │   ├── ai/
 │   │   └── BusinessAnalysisService.java
-│   ├── dto/                         # Request and structured response
+│   ├── dto/                         # Request, structured response, and stream events
 │   ├── history/                     # Conversations and full message history
 │   └── memory/                      # Turn-aware window and PostgreSQL store
 ├── src/main/java/com/aibusinessassistant/product/  # Product, repository, DTOs, and InventoryTools
@@ -199,11 +199,11 @@ On backend startup, Flyway applies `V1__create_business_schema.sql`, `V2__seed_b
 
 ## API
 
-The chat endpoint consumes and produces `application/json`. It accepts `ChatRequestDTO` with a required UUID `conversationId` and a `query` string. Reuse the ID for follow-up questions and use a new UUID for a new chat.
+Both chat endpoints consume `application/json` with `ChatRequestDTO`: a required UUID `conversationId` and a `query` string. Reuse the ID for follow-up questions and use a new UUID for a new chat.
 
 ### `POST /api/chat`
 
-Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. This is the endpoint used by Flutter. There is no separate business-analysis route or free-form response endpoint.
+Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. Flutter uses this endpoint in Structured Chat. There is no separate business-analysis route or free-form response endpoint.
 
 ```bash
 curl --request POST http://localhost:8080/api/chat \
@@ -229,6 +229,19 @@ Generated responses vary. Calling the endpoint sends the query to Gemini and may
 
 Other supported queries include `"How much did we sell from January 1 to March 31, 2026?"`, `"What is the current stock for product ID 1?"`, and `"What are the purchase statistics for customer ID 1?"`. With the original seed data, customer 1 (Maya Reed) has three orders totaling `483.00`, with an average order value of `161.00`. These values are internal tool data; the HTTP response remains the same three analysis fields.
 
+### `POST /api/chat/stream`
+
+Returns `text/event-stream` with JSON `data:` values. Events can be `TOOL_STARTED`, `TOOL_COMPLETED`, `CHUNK`, `DONE`, or `ERROR`. Tool events expose a tool name, not its arguments or result. Text arrives in actual provider chunks; `DONE` follows successful history persistence, while failures produce a safe `ERROR` without `DONE`.
+
+```bash
+curl -N http://localhost:8080/api/chat/stream \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: text/event-stream' \
+  --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Which products are low stock?"}'
+```
+
+The Flutter client parses SSE framing and UTF-8 across network chunks. It appends each `CHUNK` to one assistant message, presents tool activity as temporary status, and can abort a stream when starting a New Chat or disposing the screen. Nginx disables API proxy buffering for the containerized Web client.
+
 ## Verification
 
 Start PostgreSQL and load `deploy/.env` into the shell with the JDBC mappings shown above, then run the backend build and tests from the repository root:
@@ -238,7 +251,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint tests substitute `BusinessAnalysisService` and verify all three response fields, ID/query forwarding, and rejection of a missing ID. Persistence tests verify Flyway migrations, seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
+The endpoint tests substitute `BusinessAnalysisService` and verify structured fields, stream event order and tool filtering, UUID validation, history persistence, and safe error events. Persistence tests verify Flyway migrations, seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
 
 For the frontend, from the repository root:
 
@@ -249,22 +262,22 @@ flutter test
 flutter build web --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
 
-The Flutter tests cover structured parsing, chat state, normalized failures and retry, section visibility, suggested prompts, keyboard input, and reset behavior.
+The Flutter tests cover structured parsing and rendering, SSE framing and UTF-8, progressive messages and tool status, normalized failures and retry, UUID reuse, mode switching, suggested prompts, and reset/cancellation behavior.
 
 ## Security
 
-Never commit API keys. Keep real secrets in local environment files or backend environment configuration, never in Flutter build arguments or source code. The Docker Compose setup is intended for local/demo use.
+Never commit API keys. Keep real secrets in local environment files or backend environment configuration, never in Flutter build arguments or source code. The Docker Compose setup binds its published ports to `127.0.0.1`.
 
 ## Roadmap
 
-1. **Completed:** PostgreSQL persistence, structured chat integration, conversation history and turn-aware memory, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
+1. **Completed:** PostgreSQL persistence, structured and streaming chat integration, conversation history and turn-aware memory, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
 2. Additional explicit read-only business tools beyond the current inventory, sales, and customer aggregates.
 3. Conversation history retrieval and resume UI.
 4. Embeddings and pgvector.
 5. RAG.
 6. Further reliability, security, and observability work.
 7. AI response evaluation.
-8. MCP and Agents concepts.
+8. Potential MCP and agent integration.
 
 ## Owner
 

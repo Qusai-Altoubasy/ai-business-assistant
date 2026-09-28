@@ -3,11 +3,17 @@ import 'package:flutter/material.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../controllers/chat_state.dart';
 
 class ChatHeader extends StatelessWidget {
-  const ChatHeader({super.key, this.onOpenNavigation});
+  const ChatHeader({
+    super.key,
+    this.onOpenNavigation,
+    this.mode = ChatMode.structured,
+  });
 
   final VoidCallback? onOpenNavigation;
+  final ChatMode mode;
 
   @override
   Widget build(BuildContext context) {
@@ -47,8 +53,10 @@ class ChatHeader extends StatelessWidget {
                               style: AppTextStyles.headline,
                             ),
                             if (!compact)
-                              const _StatusPill(
-                                label: 'Backend target configured',
+                              _StatusPill(
+                                label: mode == ChatMode.streaming
+                                    ? 'Live streaming · Business analysis'
+                                    : 'Structured chat · Business analysis',
                               ),
                           ],
                         ),
