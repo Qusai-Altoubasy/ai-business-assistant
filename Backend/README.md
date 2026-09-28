@@ -1,6 +1,6 @@
 # AI Business Assistant — Backend
 
-The Quarkus backend for an educational AI Business Assistant. It exposes one Gemini-backed structured chat endpoint and reads business data from PostgreSQL.
+The Quarkus backend for AI Business Assistant. It exposes Gemini-backed structured and streaming chat endpoints and reads business data from PostgreSQL.
 
 Resource-based prompting, structured output, PostgreSQL-backed conversation history and turn-aware memory, and read-only inventory, sales, customer statistics, and current-date tools are implemented. Embeddings, pgvector, RAG, and further reliability/evaluation remain future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
 
@@ -18,6 +18,7 @@ Quarkus and LangChain4j dependencies use the BOMs in [pom.xml](pom.xml). The Pos
 ## Current Implemented Features
 
 - `POST /api/chat` returns `BusinessAnalysisDTO` with `summary`, `insights`, and `recommendations`.
+- `POST /api/chat/stream` streams JSON SSE events using the same tools and persistent conversation memory.
 - `BusinessAnalysisService` uses `@RegisterAiService`, `@SystemMessage`, `@UserMessage`, and `@MemoryId` to keep conversations separate.
 - PostgreSQL stores successful user/assistant exchanges and the active context window. The window retains the latest 10 whole user turns and the system message.
 - Inventory tools read low-stock products and stock for an individual product ID through `ProductRepository`.
@@ -37,7 +38,7 @@ The AI prompt is zero-shot and is loaded from [prompts/business-analysis-system.
 - Requests the current-date tool for relative dates rather than guessing the date.
 - For unrelated questions, requests a brief out-of-scope `summary`, empty `insights`, and one business-focused suggestion in `recommendations`.
 - Requires evidence or a supplied benchmark before classifying results, asserting trends/causes, or assigning customer segments. Optional explanations and suggestions must be presented as possibilities.
-- Requests factual reporting, explicit treatment of missing data/entities, and the same structured DTO for every response.
+- Requests factual reporting and explicit treatment of missing data/entities. Structured requests use the analysis DTO; streaming requests use plain text.
 
 These are model instructions, not hard API validation or guarantees of factual accuracy. The resource is bundled in the application; prompt changes require rebuilding/restarting the packaged backend.
 
@@ -48,11 +49,14 @@ Backend/
 ├── src/main/java/com/aibusinessassistant/
 │   ├── chat/
 │   │   ├── ChatResource.java
+│   │   ├── ChatService.java
 │   │   ├── ai/
 │   │   │   └── BusinessAnalysisService.java
 │   │   ├── dto/
 │   │   │   ├── ChatRequestDTO.java
-│   │   │   └── BusinessAnalysisDTO.java
+│   │   │   ├── BusinessAnalysisDTO.java
+│   │   │   ├── ChatStreamEventDTO.java
+│   │   │   └── StreamEventType.java
 │   │   ├── history/          # Conversations and complete user/assistant history
 │   │   └── memory/           # Turn-aware window and PostgreSQL backing store
 │   ├── product/
@@ -94,25 +98,27 @@ Backend/
 └── pom.xml
 ```
 
-Packages group code by business feature. The chat resource, AI interface, and DTOs live together under `chat`; each persistence feature owns its entities, repositories, and business tools. The current-date tool is shared under `common.tools`.
+Packages group code by business feature. The chat resource, orchestration service, AI interface, and DTOs live together under `chat`; each persistence feature owns its entities, repositories, and business tools. `ChatResource` validates HTTP requests and delegates to `ChatService`, which handles AI invocation, streaming events, logging, and history persistence. The current-date tool is shared under `common.tools`.
 
 ### Request Flow
 
 ```text
 Client JSON conversationId + query
   → ChatResource
+  → ChatService
   → BusinessAnalysisService (@MemoryId)
       ↔ TurnAwareChatMemory → PostgresChatMemoryStore → PostgreSQL chat_memory_state
   → Google Gemini
       ↕ when business data is needed
     InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
     CommonTools → current application date
-  → BusinessAnalysisDTO
-  → ChatResource → ConversationHistoryService → PostgreSQL chat_messages
-  → JSON response
+  → BusinessAnalysisDTO or streamed ChatEvent values
+  → ChatService → ConversationHistoryService → PostgreSQL chat_messages
+  → ChatResource
+  → JSON response or JSON SSE events
 ```
 
-`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 whole user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Successful user and assistant exchanges are stored separately in `chat_messages` and are not deleted when turns leave the active window. The AI service is `@ApplicationScoped`, and the PostgreSQL store supplies its memory across requests. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The client receives only the final structured analysis, without tool-call details.
+`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 whole user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Successful user and assistant exchanges are stored separately in `chat_messages` and are not deleted when turns leave the active window. The AI service is `@ApplicationScoped`, and the PostgreSQL store supplies its memory across requests. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The structured endpoint returns the final analysis without tool details; the streaming endpoint emits text chunks and tool names, but not tool arguments or results.
 
 ### Registered Tools
 
@@ -256,7 +262,7 @@ The suite includes chat endpoint, business-persistence, conversation-memory pers
 
 ## API
 
-The endpoint consumes and produces `application/json` and accepts `{"conversationId":"...","query":"..."}`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
+Both endpoints consume `application/json` and accept `{"conversationId":"...","query":"..."}`. `/api/chat` produces JSON; `/api/chat/stream` produces `text/event-stream`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
 
 ### `POST /api/chat`
 
@@ -274,7 +280,7 @@ curl http://localhost:8080/api/chat \
 }
 ```
 
-`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. `/api/chat` is also the endpoint used by Flutter. The previous separate business-analysis route, `ChatService`, and `ChatResponseDTO` are removed. Application logs record analysis request lengths/completion timing and tool arguments/results without recording the query text.
+`BusinessAnalysisDTO` is a Java record containing `summary`, `insights`, and `recommendations`; the latter two fields are lists of strings. Flutter uses `/api/chat` in Structured Chat and `/api/chat/stream` in Streaming Chat. `ChatResource` delegates both endpoints to the concrete `ChatService`. Application logs record request lengths/completion timing and tool activity without recording the query text.
 
 For customer analysis, use the same endpoint and contract:
 
@@ -284,7 +290,59 @@ curl http://localhost:8080/api/chat \
   --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"What are the purchase statistics for customer ID 1?"}'
 ```
 
-Customer statistics DTOs are internal tool results; they are not new HTTP response fields. The system prompt also instructs out-of-scope requests to use `BusinessAnalysisDTO`, with empty insights and one suggestion to ask about the supported business domains.
+Customer statistics DTOs are internal tool results; they are not new HTTP response fields. Structured out-of-scope responses use `BusinessAnalysisDTO`, with empty insights and one suggestion to ask about the supported business domains.
+
+### `POST /api/chat/stream`
+
+```bash
+curl -N http://localhost:8080/api/chat/stream \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: text/event-stream' \
+  --data '{"conversationId":"f9019d76-2372-49e2-bef9-c05d0ad1c925","query":"Give me a short business analysis about reducing excess inventory."}'
+```
+
+Tool Calling example:
+
+```bash
+curl -N http://localhost:8080/api/chat/stream \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: text/event-stream' \
+  --data '{"conversationId":"03da41ca-af68-49ce-ae03-89ea95d5de2c","query":"Which products are low stock?"}'
+```
+
+Memory example (run sequentially using the same UUID):
+
+```bash
+curl -N http://localhost:8080/api/chat/stream \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: text/event-stream' \
+  --data '{"conversationId":"0dc136ef-58ba-48de-a41a-c6f8a490fb1c","query":"Show me customer 2 statistics."}'
+
+curl -N http://localhost:8080/api/chat/stream \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: text/event-stream' \
+  --data '{"conversationId":"0dc136ef-58ba-48de-a41a-c6f8a490fb1c","query":"How much did they spend?"}'
+```
+
+`BusinessAnalysisService.chatStream` returns `Multi<ChatEvent>` using the event API supported by the installed Quarkus LangChain4j extension. The REST endpoint returns `Multi<ChatStreamEventDTO>` with JSON SSE `data:` elements. Gemini's actual partial responses become `CHUNK` events without splitting or waiting for the complete answer. `BeforeToolExecutionEvent` becomes `TOOL_STARTED`, and `ToolExecutedEvent` becomes `TOOL_COMPLETED`; both expose only the actual tool name. Thinking, arguments, raw results, and intermediate responses are filtered out.
+
+```text
+data: {"type":"TOOL_STARTED","content":"getLowStockProducts"}
+
+data: {"type":"TOOL_COMPLETED","content":"getLowStockProducts"}
+
+data: {"type":"CHUNK","content":"Three products are low stock."}
+
+data: {"type":"DONE","content":null}
+```
+
+This method shares the resource-based system prompt, registered tools, `@MemoryId`, turn-aware memory provider, and PostgreSQL memory store with `chat`. The shared prompt selects JSON when the existing method requires its DTO schema, and plain text otherwise. Both Gemini model types use the existing API key, model ID, temperature, and other chat-model settings. `/api/chat` still returns `BusinessAnalysisDTO`; the SSE protocol does not stream that DTO.
+
+Quarkus REST keeps the connection open until generation finishes. `ChatService` accumulates only `CHUNK` content to save one successful USER/ASSISTANT exchange in `chat_messages`; status events never enter assistant text, and accumulation does not delay delivery. After successful completion, history is persisted before exactly one final `DONE` event. Completion/history persistence runs on Quarkus's existing worker pool because the application uses blocking JDBC, without a transaction spanning LLM generation.
+
+Stream or history-persistence failures are logged in detail and produce one final `{"type":"ERROR","content":"Unable to complete the streaming request."}` event with no `DONE` afterward. Partial failed responses are not saved as successful exchanges. Invalid/missing conversation UUIDs still return HTTP 400 before streaming starts.
+
+The installed Quarkus `3.39.3`, Quarkus LangChain4j `1.13.1`, and LangChain4j `1.19.0` already support actual tool lifecycle events; no dependency changes are required. Chunk sizes and timing are provider-controlled, and chunks are not guaranteed to correspond to individual tokens. This version commits streaming input to active memory before generation, so a failed/cancelled turn can leave input in that window; only successful exchanges enter full history. Finish one request before sending another with the same conversation ID, including requests that mix the two endpoints.
 
 ## Current Limitations
 
@@ -298,7 +356,7 @@ Customer statistics DTOs are internal tool results; they are not new HTTP respon
 
 ## Roadmap
 
-This educational progression distinguishes completed work from planned capabilities; planned items are not delivery commitments:
+Completed capabilities and possible future work:
 
 1. **Completed:** PostgreSQL persistence, repositories, migrations, seed data, structured chat, conversation history and turn-aware memory, low-stock and product-stock queries, sales summaries, customer purchase statistics, current-date Tool Calling, and a resource-based business prompt.
 2. **Next:** Additional explicit read-only business queries beyond the existing tools.
@@ -312,4 +370,4 @@ This educational progression distinguishes completed work from planned capabilit
 
 ## Scope / Non-Goals
 
-This is an incremental learning project, not a full ERP. The current scope excludes a large CRUD surface, microservices, Kafka, complex authentication, and premature Agents/MCP work. Generated SQL is not the default planned LLM strategy; the next phase focuses on explicit read-only tools. Frontend work belongs to the separate Flutter project.
+The current API focuses on chat and read-only business queries. It does not provide a full ERP or a large CRUD surface, microservices, Kafka, or authentication. Generated SQL is not used for model-driven data access; company data comes from explicit read-only tools. The Flutter client lives in the separate `Frontend` directory.
