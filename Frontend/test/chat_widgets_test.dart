@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:ai_business_assistant/app/theme/app_theme.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/business_analysis.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:ai_business_assistant/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_providers.dart';
 import 'package:ai_business_assistant/features/chat/presentation/pages/chat_page.dart';
@@ -13,6 +14,117 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'Streaming mode uses the shared composer and one progressive assistant card',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = _PendingRepository();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [chatRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            theme: AppTheme.light,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(0.85)),
+              child: child!,
+            ),
+            home: const ChatPage(),
+          ),
+        ),
+      );
+      expect(find.text('CHAT MODE'), findsOneWidget);
+      expect(find.text('ARCHITECTURE MODULES'), findsNothing);
+      expect(find.text('Memory · Available'), findsOneWidget);
+      await tester.tap(find.text('Streaming Chat'));
+      await tester.pump();
+      const prompt = 'Which products are currently low in stock?';
+      await tester.tap(find.text(prompt));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('send-button')));
+      await tester.pump();
+      expect(repository.streamMessages, [prompt]);
+      expect(repository.messages, isEmpty);
+      repository.events.add(
+        const ChatStreamEvent(
+          StreamEventType.toolStarted,
+          'getLowStockProducts',
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Checking inventory…'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('send-button')))
+            .onPressed,
+        isNull,
+      );
+      repository.events.add(
+        const ChatStreamEvent(
+          StreamEventType.toolCompleted,
+          'getLowStockProducts',
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Business data retrieved…'), findsOneWidget);
+      repository.events.add(
+        const ChatStreamEvent(StreamEventType.chunk, 'Hello'),
+      );
+      await tester.pump();
+      expect(find.text('Hello'), findsOneWidget);
+      expect(find.byType(AssistantMessageCard), findsOneWidget);
+      repository.events.add(
+        const ChatStreamEvent(StreamEventType.chunk, ' world'),
+      );
+      await tester.pump();
+      expect(find.text('Hello world'), findsOneWidget);
+      expect(find.byType(AssistantMessageCard), findsOneWidget);
+      repository.events.add(const ChatStreamEvent(StreamEventType.done, null));
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Receiving response…'), findsNothing);
+      await tester.tap(find.byKey(const Key('new-chat-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Hello world'), findsNothing);
+      expect(find.text('Live streaming · Business analysis'), findsOneWidget);
+      expect(find.text(prompt), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('interrupted streaming keeps partial text and a separate error', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantMessageCard(
+            message: ChatMessage(
+              id: 'a',
+              role: ChatRole.assistant,
+              content: 'Partial answer',
+              createdAt: DateTime(2026),
+              status: MessageStatus.error,
+              error: 'Unable to complete the streaming request.',
+            ),
+            onRetry: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Partial answer'), findsOneWidget);
+    expect(
+      find.text(
+        'Response interrupted. Unable to complete the streaming request.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('retry-button')), findsOneWidget);
+  });
   for (final insights in [
     <String>[],
     ['Low stock'],
@@ -180,6 +292,21 @@ void main() {
 class _PendingRepository implements ChatRepository {
   final messages = <String>[];
   final result = Completer<BusinessAnalysis>();
+  final streamMessages = <String>[];
+  final events = StreamController<ChatStreamEvent>();
+
+  @override
+  Stream<ChatStreamEvent> streamMessage(
+    String message,
+    String conversationId, {
+    Future<void>? abortTrigger,
+  }) {
+    streamMessages.add(message);
+    abortTrigger?.then((_) {
+      if (!events.isClosed) events.close();
+    });
+    return events.stream;
+  }
 
   @override
   Future<BusinessAnalysis> sendMessage(String message, String conversationId) {

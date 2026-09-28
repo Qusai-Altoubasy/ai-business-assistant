@@ -81,12 +81,28 @@ class AssistantMessageCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     if (!loading && !failed && analysis != null)
                       _BusinessAnalysisContent(analysis: analysis)
-                    else
+                    else if (message.content.isNotEmpty)
                       SelectableText(
                         message.content,
                         style: AppTextStyles.body,
                       ),
+                    if (loading && message.progressLabel != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          message.progressLabel!,
+                          style: AppTextStyles.bodySmall,
+                        ),
+                      ),
                     if (failed) ...[
+                      if (message.error != null &&
+                          message.error != message.content)
+                        Text(
+                          'Response interrupted. ${message.error}',
+                          style: AppTextStyles.body.copyWith(
+                            color: AppColors.error,
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       TextButton.icon(
                         key: const Key('retry-button'),

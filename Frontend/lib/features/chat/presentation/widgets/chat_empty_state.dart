@@ -99,7 +99,10 @@ class ChatEmptyState extends StatelessWidget {
               icon: Icons.hub_outlined,
               label: 'Semantic search · Planned',
             ),
-            _Capability(icon: Icons.memory_outlined, label: 'Memory · Planned'),
+            _Capability(
+              icon: Icons.memory_outlined,
+              label: 'Memory · Available',
+            ),
             _Capability(
               icon: Icons.verified_outlined,
               label: 'Citations · Planned',

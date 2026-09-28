@@ -33,7 +33,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   Future<void> _submit() async {
     final message = _inputController.text;
-    if (message.trim().isEmpty) return;
+    if (message.trim().isEmpty ||
+        ref.read(chatControllerProvider).isSubmitting) {
+      return;
+    }
     final operation = ref
         .read(chatControllerProvider.notifier)
         .sendMessage(message);
@@ -59,7 +62,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   void _scrollToLatest() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+      if (mounted && _scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 220),
@@ -72,8 +75,11 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatControllerProvider);
-    ref.listen<int>(
-      chatControllerProvider.select((value) => value.messages.length),
+    ref.listen(
+      chatControllerProvider.select(
+        (value) =>
+            (value.messages.length, value.messages.lastOrNull?.content.length),
+      ),
       (_, _) => _scrollToLatest(),
     );
 
@@ -86,7 +92,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ? null
               : Drawer(
                   width: AppSpacing.sidebarWidth,
-                  child: SafeArea(child: AppSidebar(onNewChat: _resetChat)),
+                  child: SafeArea(
+                    child: AppSidebar(
+                      onNewChat: _resetChat,
+                      mode: state.mode,
+                      isSubmitting: state.isSubmitting,
+                      onModeChanged: ref
+                          .read(chatControllerProvider.notifier)
+                          .setMode,
+                    ),
+                  ),
                 ),
           body: Row(
             children: [
@@ -95,12 +110,20 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   decoration: const BoxDecoration(
                     boxShadow: [AppColors.softShadow],
                   ),
-                  child: AppSidebar(onNewChat: _resetChat),
+                  child: AppSidebar(
+                    onNewChat: _resetChat,
+                    mode: state.mode,
+                    isSubmitting: state.isSubmitting,
+                    onModeChanged: ref
+                        .read(chatControllerProvider.notifier)
+                        .setMode,
+                  ),
                 ),
               Expanded(
                 child: Column(
                   children: [
                     ChatHeader(
+                      mode: state.mode,
                       onOpenNavigation: desktop
                           ? null
                           : () => _scaffoldKey.currentState?.openDrawer(),

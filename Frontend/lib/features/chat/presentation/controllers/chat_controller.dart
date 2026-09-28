@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../domain/entities/business_analysis.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/chat_stream_event.dart';
 import '../../domain/repositories/chat_repository.dart';
 import 'chat_state.dart';
 
@@ -14,14 +16,36 @@ class ChatController extends StateNotifier<ChatState> {
   final ChatRepository _repository;
   int _idSeed = 0;
   String _conversationId = _newConversationId();
+  Completer<void>? _activeAbort;
+
+  void setMode(ChatMode mode) {
+    if (!mounted || state.isSubmitting) return;
+    state = state.copyWith(mode: mode);
+  }
+
+  @override
+  void dispose() {
+    _cancelStream();
+    super.dispose();
+  }
+
+  void _cancelStream() {
+    final abort = _activeAbort;
+    _activeAbort = null;
+    if (abort != null && !abort.isCompleted) abort.complete();
+  }
 
   Future<bool> sendMessage(String rawMessage) async {
     final prompt = rawMessage.trim();
-    if (prompt.isEmpty || state.isSubmitting) return false;
+    if (!mounted || prompt.isEmpty || state.isSubmitting) return false;
 
     final now = DateTime.now();
     final conversationId = _conversationId;
     final assistantId = _nextId('assistant');
+    final streaming = state.mode == ChatMode.streaming;
+    final responseText = StringBuffer();
+    final abort = streaming ? Completer<void>() : null;
+    _activeAbort = abort;
     state = state.copyWith(
       isSubmitting: true,
       clearLastFailedPrompt: true,
@@ -36,7 +60,8 @@ class ChatController extends StateNotifier<ChatState> {
         ChatMessage(
           id: assistantId,
           role: ChatRole.assistant,
-          content: 'Analyzing your request…',
+          content: streaming ? '' : 'Analyzing your request…',
+          progressLabel: streaming ? 'Waiting for response…' : null,
           createdAt: now,
           status: MessageStatus.sending,
         ),
@@ -44,8 +69,64 @@ class ChatController extends StateNotifier<ChatState> {
     );
 
     try {
+      if (streaming) {
+        await for (final event in _repository.streamMessage(
+          prompt,
+          conversationId,
+          abortTrigger: abort!.future,
+        )) {
+          if (!mounted || conversationId != _conversationId) return true;
+          switch (event.type) {
+            case StreamEventType.chunk:
+              responseText.write(event.content!);
+              _replaceAssistant(
+                assistantId,
+                content: responseText.toString(),
+                status: MessageStatus.sending,
+                progressLabel: 'Receiving response…',
+              );
+            case StreamEventType.toolStarted:
+              _replaceAssistant(
+                assistantId,
+                content: responseText.toString(),
+                status: MessageStatus.sending,
+                progressLabel: _toolStatus(event.content!),
+              );
+            case StreamEventType.toolCompleted:
+              _replaceAssistant(
+                assistantId,
+                content: responseText.toString(),
+                status: MessageStatus.sending,
+                progressLabel: 'Business data retrieved…',
+              );
+            case StreamEventType.done:
+              _replaceAssistant(
+                assistantId,
+                content: responseText.toString(),
+                status: MessageStatus.success,
+              );
+              state = state.copyWith(
+                isSubmitting: false,
+                clearLastFailedPrompt: true,
+              );
+              return true;
+            case StreamEventType.error:
+              _setFailure(
+                assistantId,
+                prompt,
+                event.content!,
+                partialContent: responseText.toString(),
+              );
+              return true;
+          }
+        }
+        throw const ApiException(
+          ApiFailureType.network,
+          'The response was interrupted before completion. Please try again.',
+        );
+      }
       final response = await _repository.sendMessage(prompt, conversationId);
-      if (conversationId != _conversationId) return true;
+      if (!mounted || conversationId != _conversationId) return true;
       _replaceAssistant(
         assistantId,
         content: response.summary,
@@ -54,15 +135,24 @@ class ChatController extends StateNotifier<ChatState> {
       );
       state = state.copyWith(isSubmitting: false, clearLastFailedPrompt: true);
     } on ApiException catch (error) {
-      if (conversationId != _conversationId) return true;
-      _setFailure(assistantId, prompt, error.userMessage);
+      if (!mounted || conversationId != _conversationId) return true;
+      _setFailure(
+        assistantId,
+        prompt,
+        error.userMessage,
+        partialContent: streaming ? responseText.toString() : null,
+      );
     } catch (_) {
-      if (conversationId != _conversationId) return true;
+      if (!mounted || conversationId != _conversationId) return true;
       _setFailure(
         assistantId,
         prompt,
         'I could not retrieve a response from the AI service.',
+        partialContent: streaming ? responseText.toString() : null,
       );
+    } finally {
+      if (abort != null && !abort.isCompleted) abort.complete();
+      if (identical(_activeAbort, abort)) _activeAbort = null;
     }
     return true;
   }
@@ -86,14 +176,21 @@ class ChatController extends StateNotifier<ChatState> {
   }
 
   void resetChat() {
+    final mode = state.mode;
+    _cancelStream();
     _conversationId = _newConversationId();
-    state = const ChatState();
+    state = ChatState(mode: mode);
   }
 
-  void _setFailure(String id, String prompt, String error) {
+  void _setFailure(
+    String id,
+    String prompt,
+    String error, {
+    String? partialContent,
+  }) {
     _replaceAssistant(
       id,
-      content: error,
+      content: partialContent ?? error,
       status: MessageStatus.error,
       error: error,
     );
@@ -106,6 +203,7 @@ class ChatController extends StateNotifier<ChatState> {
     required MessageStatus status,
     String? error,
     BusinessAnalysis? analysis,
+    String? progressLabel,
   }) {
     state = state.copyWith(
       messages: [
@@ -120,12 +218,21 @@ class ChatController extends StateNotifier<ChatState> {
               error: error,
               metadata: item.metadata,
               analysis: analysis,
+              progressLabel: progressLabel,
             )
           else
             item,
       ],
     );
   }
+
+  static String _toolStatus(String tool) => switch (tool) {
+    'getLowStockProducts' || 'getProductStock' => 'Checking inventory…',
+    'getCustomerStatistics' => 'Checking customer data…',
+    'getSales' => 'Checking sales data…',
+    'getCurrentDate' => 'Checking the current date…',
+    _ => 'Checking business data…',
+  };
 
   String _nextId(String prefix) =>
       '$prefix-${DateTime.now().microsecondsSinceEpoch}-${_idSeed++}';
@@ -135,7 +242,9 @@ class ChatController extends StateNotifier<ChatState> {
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    final hex = bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
         '${hex.substring(20)}';

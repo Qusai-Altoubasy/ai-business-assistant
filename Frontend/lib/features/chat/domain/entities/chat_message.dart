@@ -15,6 +15,7 @@ class ChatMessage {
     this.error,
     this.metadata,
     this.analysis,
+    this.progressLabel,
   });
 
   final String id;
@@ -25,4 +26,5 @@ class ChatMessage {
   final String? error;
   final AssistantMessageMetadata? metadata;
   final BusinessAnalysis? analysis;
+  final String? progressLabel;
 }

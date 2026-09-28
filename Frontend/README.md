@@ -1,16 +1,16 @@
 # AI Business Assistant — Flutter frontend
 
-Desktop-first Flutter client for the backend's AI chat endpoint. The
+Desktop-first Flutter client for the backend's two AI chat endpoints. The
 current implementation provides sales, inventory, and customer purchase analysis
 through the existing chat flow.
-The sidebar marks Analytics, Data Sources, and Tools as `In chat`; separate
-module screens are not implemented, and the remaining modules are marked `Planned`.
+The sidebar's Chat Mode section selects Structured Chat or Streaming Chat.
+Both modes share one chat screen, composer, and conversation.
 
 ## Prerequisites
 
 - Flutter stable (the project was generated with Flutter 3.44 and Dart 3.12)
 - Chrome for Flutter Web, or the Linux desktop toolchain
-- The backend running and exposing `POST /api/chat`
+- The backend running and exposing `POST /api/chat` and `POST /api/chat/stream`
 
 ## Install
 
@@ -32,7 +32,7 @@ flutter run -d chrome \
 ```
 
 If you use another Web origin, set `FRONTEND_ORIGIN` for the backend to that
-exact origin. Avoid an unrestricted CORS policy outside disposable local demos.
+exact origin. Keep CORS restricted to the frontend origin.
 
 ## Run on Linux
 
@@ -51,12 +51,19 @@ address reachable from that device instead of `localhost`.
   products, stock for a product ID, and last month's sales. Selecting one fills
   the composer; Send or Enter submits it through the same chat flow.
 - Enter sends a message; Shift+Enter inserts a newline.
-- Trims messages and sends them with a stable UUID v4 conversation ID as JSON to `POST /api/chat`. Follow-up requests reuse that ID.
+- Trims messages and sends them with a stable UUID v4 conversation ID as JSON to the selected endpoint. Follow-up requests and mode switches reuse that ID.
 - Renders structured `summary`, `insights`, and `recommendations` inside the
   existing assistant message. Empty list sections are hidden.
+- Streaming Chat consumes JSON SSE events from `POST /api/chat/stream` and appends
+  each CHUNK exactly as received to one assistant message. Tool events show temporary
+  inventory/customer/sales progress, not separate chat messages. DONE finalizes the
+  response; ERROR or a connection ending without DONE preserves partial text and
+  shows a separate safe error with Retry.
+- Mode switching and sending are disabled during a response. New Chat or controller
+  disposal aborts an active stream; late responses cannot update the new chat.
 - Converts timeouts, network failures, unsuccessful responses, malformed
   payloads, and empty summaries into safe inline errors with Retry.
-- New Chat resets local state, creates a new UUID v4 conversation ID, and clears the composer.
+- New Chat resets local state, creates a new UUID v4 conversation ID, clears the composer, and preserves the selected mode.
 - The sidebar lists example questions, not persisted conversation history.
 - Business data, sales, and inventory analysis are marked available. The backend
   persists conversation history and a bounded AI context, but the frontend has
@@ -69,7 +76,7 @@ range, and purchase statistics for a customer ID (order count, total spent,
 and average order value across all recorded orders). Relative-date questions
 use the backend's current date. Seeded orders
 cover January–March 2026; last month may be outside that period, so the explicit
-January–March suggested prompt is useful for the demo. Customer analysis can be
+January–March suggested prompt is useful for the seeded data. Customer analysis can be
 requested by typing, for example, `What are the purchase statistics for customer
 ID 1?` in the same composer; it has no dedicated suggested prompt or profile
 screen. Company-policy retrieval is not implemented.
@@ -78,7 +85,8 @@ The backend's resource-based prompt supports inventory, products, sales, orders,
 customers, and related general business concepts. It instructs unrelated
 requests to return an out-of-scope summary, empty insights, and a business-focused
 recommendation. The frontend renders those fields through the same assistant
-widget; it does not implement separate domain filtering or tool-call UI.
+widget in Structured Chat. Streaming Chat shows the generated text and subtle
+tool progress; neither mode implements separate domain filtering.
 
 The backend endpoint accepts `{"conversationId":"...","query":"..."}` and returns
 `{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
@@ -95,7 +103,7 @@ separate business-analysis route and free-form `response` contract are removed.
 lib/
 ├── app/                         # application shell and design system
 ├── core/config/                 # dart-define configuration
-├── core/network/                # Dio client and normalized failures
+├── core/network/                # Dio, streamed HTTP, and normalized failures
 └── features/chat/
     ├── data/                    # response model, remote source, and repository
     ├── domain/                  # message entities and repository contract
@@ -107,7 +115,18 @@ to a domain `BusinessAnalysis`. Riverpod stores it on the existing message
 entity, and the assistant widget renders its sections. Message `content` keeps
 the summary as a text fallback; lists remain structured. Existing optional
 metadata is separate and unused by this response. Backend tool execution details
-are not part of the frontend contract.
+are not displayed as content. The same repository/controller also handles streamed
+`ChatStreamEvent` values and temporary progress on the existing message entity.
+
+Dio continues handling structured requests. Streaming uses `http` 1.6's Fetch-backed
+browser client inside the same `ApiClient`, because Dio's XHR web adapter buffers
+responses until completion. A streaming UTF-8 decoder and line splitter handle
+arbitrary byte fragments, CRLF, comments, and multiline SSE data. Unknown event
+types and malformed JSON are rejected safely. Abortable requests support cleanup
+on New Chat, DONE/ERROR, or disposal. No generation timers or polling are used.
+Nginx API proxy buffering is disabled so deployed SSE also arrives progressively.
+Any additional reverse proxy must likewise allow streaming; the existing CORS
+origin configuration still applies. The stream has a two-minute inactivity timeout.
 
 ## Verification
 
