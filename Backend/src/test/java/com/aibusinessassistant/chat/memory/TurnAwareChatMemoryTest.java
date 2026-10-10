@@ -53,7 +53,7 @@ class TurnAwareChatMemoryTest {
                 UserMessage.from("Second"),
                 new AiMessage("Second answer")));
 
-        assertEquals(3, memory.messages().size());
+        assertEquals(5, memory.messages().size());
         assertInstanceOf(SystemMessage.class, memory.messages().get(0));
         assertEquals("Second", ((UserMessage) memory.messages().get(1)).singleText());
     }

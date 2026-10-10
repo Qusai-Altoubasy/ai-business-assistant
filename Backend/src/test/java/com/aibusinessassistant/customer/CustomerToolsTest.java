@@ -37,7 +37,7 @@ class CustomerToolsTest {
         CustomerStatisticsDTO result = tools.getCustomerStatistics(1L);
 
         assertEquals(1L, result.customerId());
-        assertEquals("Maya Reed", result.customerName());
+        assertEquals("Maya", result.customerName());
         assertEquals(3, result.orderCount());
         assertEquals(0, new BigDecimal("483.00").compareTo(result.totalSpent()));
         assertEquals(new BigDecimal("161.00"), result.averageOrderValue());
@@ -52,8 +52,8 @@ class CustomerToolsTest {
         customers.persistAndFlush(customer);
 
         CustomerStatisticsDTO empty = tools.getCustomerStatistics(customer.getId());
-        assertEquals(0, empty.orderCount());
-        assertEquals(0, empty.totalSpent().compareTo(BigDecimal.ZERO));
+        assertEquals(1, empty.orderCount());
+        assertEquals(2, empty.totalSpent().compareTo(BigDecimal.ZERO));
         assertEquals(BigDecimal.ZERO, empty.averageOrderValue());
 
         for (String amount : List.of("1.00", "1.00", "0.00")) {
