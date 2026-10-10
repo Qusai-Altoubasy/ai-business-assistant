@@ -152,6 +152,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                                           focusNode: _inputFocusNode,
                                           onSend: _submit,
                                           isSubmitting: state.isSubmitting,
+                                          provider: state.provider,
+                                          isProviderPinned:
+                                              state.isProviderPinned,
+                                          onProviderChanged: ref
+                                              .read(
+                                                chatControllerProvider.notifier,
+                                              )
+                                              .setProvider,
                                         ),
                                         const _Disclaimer(),
                                       ],
@@ -175,6 +183,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                                         focusNode: _inputFocusNode,
                                         onSend: _submit,
                                         isSubmitting: state.isSubmitting,
+                                        provider: state.provider,
+                                        isProviderPinned:
+                                            state.isProviderPinned,
+                                        onProviderChanged: ref
+                                            .read(
+                                              chatControllerProvider.notifier,
+                                            )
+                                            .setProvider,
                                       ),
                                       const _Disclaimer(),
                                     ],

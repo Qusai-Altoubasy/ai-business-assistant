@@ -1,12 +1,13 @@
 import 'dart:async';
 
 import 'package:ai_business_assistant/core/network/api_exception.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/ai_provider.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/business_analysis.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_stream_event.dart';
-import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_state.dart';
 import 'package:ai_business_assistant/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_controller.dart';
+import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _analysis = BusinessAnalysis(
@@ -22,7 +23,8 @@ void main() {
       () async {
         final repository = _StreamingRepository();
         final controller = ChatController(repository)
-          ..setMode(ChatMode.streaming);
+          ..setMode(ChatMode.streaming)
+          ..setProvider(AiProvider.ollama);
         addTearDown(controller.dispose);
         final pending = controller.sendMessage('Inventory?');
         await _flush();
@@ -32,6 +34,9 @@ void main() {
           'Waiting for response…',
         );
         expect(await controller.sendMessage('Duplicate'), isFalse);
+        controller.setProvider(AiProvider.gemini);
+        expect(controller.state.provider, AiProvider.ollama);
+        expect(controller.state.canChangeProvider, isFalse);
         controller.setMode(ChatMode.structured);
         expect(controller.state.mode, ChatMode.streaming);
         repository.streams.single.add(
@@ -76,10 +81,13 @@ void main() {
         expect(controller.state.messages.last.status, MessageStatus.success);
         expect(controller.state.messages.last.progressLabel, isNull);
         expect(controller.state.isSubmitting, isFalse);
+        controller.setProvider(AiProvider.gemini);
+        expect(controller.state.provider, AiProvider.ollama);
         controller.setMode(ChatMode.structured);
         await controller.sendMessage('Follow-up');
         expect(repository.modes, [ChatMode.streaming, ChatMode.structured]);
         expect(repository.ids.first, repository.ids.last);
+        expect(repository.providers, [AiProvider.ollama, AiProvider.ollama]);
         expect(controller.state.messages, hasLength(4));
       },
     );
@@ -89,7 +97,8 @@ void main() {
       () async {
         final repository = _StreamingRepository();
         final controller = ChatController(repository)
-          ..setMode(ChatMode.streaming);
+          ..setMode(ChatMode.streaming)
+          ..setProvider(AiProvider.ollama);
         addTearDown(controller.dispose);
         final pending = controller.sendMessage('Question');
         await _flush();
@@ -110,6 +119,8 @@ void main() {
         expect(controller.state.messages.last.status, MessageStatus.error);
         expect(controller.state.messages.last.progressLabel, isNull);
         expect(controller.state.isSubmitting, isFalse);
+        controller.setProvider(AiProvider.gemini);
+        expect(controller.state.provider, AiProvider.ollama);
         final retry = controller.retryLast();
         await _flush();
         repository.streams.last.add(
@@ -118,6 +129,7 @@ void main() {
         await retry;
         expect(controller.state.messages, hasLength(2));
         expect(repository.ids.first, repository.ids.last);
+        expect(repository.providers, [AiProvider.ollama, AiProvider.ollama]);
       },
     );
 
@@ -139,11 +151,12 @@ void main() {
     });
 
     test(
-      'New Chat cancels the stream, changes UUID and preserves mode',
+      'New Chat cancels the stream, changes UUID and preserves mode and provider',
       () async {
         final repository = _StreamingRepository();
         final controller = ChatController(repository)
-          ..setMode(ChatMode.streaming);
+          ..setMode(ChatMode.streaming)
+          ..setProvider(AiProvider.ollama);
         addTearDown(controller.dispose);
         final pending = controller.sendMessage('Old question');
         await _flush();
@@ -151,9 +164,13 @@ void main() {
         await pending;
         expect(controller.state.messages, isEmpty);
         expect(controller.state.mode, ChatMode.streaming);
+        expect(controller.state.provider, AiProvider.ollama);
+        expect(controller.state.canChangeProvider, isTrue);
+        controller.setProvider(AiProvider.gemini);
         final next = controller.sendMessage('New question');
         await _flush();
         expect(repository.ids.first, isNot(repository.ids.last));
+        expect(repository.providers, [AiProvider.ollama, AiProvider.gemini]);
         repository.streams.last.add(
           const ChatStreamEvent(StreamEventType.done, null),
         );
@@ -173,6 +190,63 @@ void main() {
     });
   });
   group('ChatController', () {
+    test(
+      'defaults to Gemini and blank submissions do not pin the provider',
+      () async {
+        final repository = _FakeChatRepository(response: _analysis);
+        final controller = ChatController(repository);
+        addTearDown(controller.dispose);
+        expect(controller.state.provider, AiProvider.gemini);
+        expect(controller.state.canChangeProvider, isTrue);
+        expect(await controller.sendMessage('   '), isFalse);
+        expect(controller.state.isProviderPinned, isFalse);
+        controller.setProvider(AiProvider.ollama);
+        expect(controller.state.provider, AiProvider.ollama);
+        controller.setProvider(AiProvider.gemini);
+        await controller.sendMessage('Hello');
+        expect(repository.providers, [AiProvider.gemini]);
+      },
+    );
+
+    for (final provider in AiProvider.values) {
+      test(
+        '${provider.label} is pinned for follow-ups until New Chat',
+        () async {
+          final repository = _FakeChatRepository(response: _analysis);
+          final controller = ChatController(repository)..setProvider(provider);
+          addTearDown(controller.dispose);
+          await controller.sendMessage('First');
+          expect(controller.state.isProviderPinned, isTrue);
+          expect(controller.state.canChangeProvider, isFalse);
+          final other = AiProvider.values.firstWhere(
+            (item) => item != provider,
+          );
+          controller.setProvider(other);
+          await controller.sendMessage('Follow-up');
+          expect(controller.state.provider, provider);
+          expect(repository.providers, [provider, provider]);
+          expect(
+            repository.conversationIds.first,
+            repository.conversationIds.last,
+          );
+
+          controller.resetChat();
+          expect(controller.state.messages, isEmpty);
+          expect(controller.state.lastFailedPrompt, isNull);
+          expect(controller.state.isSubmitting, isFalse);
+          expect(controller.state.provider, provider);
+          expect(controller.state.canChangeProvider, isTrue);
+          controller.setProvider(other);
+          await controller.sendMessage('New conversation');
+          expect(repository.providers.last, other);
+          expect(
+            repository.conversationIds.first,
+            isNot(repository.conversationIds.last),
+          );
+        },
+      );
+    }
+
     test('sends a normalized message through the repository', () async {
       final repository = _FakeChatRepository(response: _analysis);
       final controller = ChatController(repository);
@@ -244,15 +318,18 @@ void main() {
           response: _analysis,
           error: const ApiException(ApiFailureType.network, 'Please retry.'),
         );
-        final controller = ChatController(repository);
+        final controller = ChatController(repository)
+          ..setProvider(AiProvider.ollama);
         addTearDown(controller.dispose);
         await controller.sendMessage('  Stock?  ');
         expect(controller.state.messages.last.analysis, isNull);
         expect(controller.state.isSubmitting, isFalse);
         repository.error = null;
+        controller.setProvider(AiProvider.gemini);
 
         expect(await controller.retryLast(), isTrue);
         expect(repository.messages, ['Stock?', 'Stock?']);
+        expect(repository.providers, [AiProvider.ollama, AiProvider.ollama]);
         expect(
           repository.conversationIds.first,
           repository.conversationIds.last,
@@ -303,11 +380,15 @@ void main() {
       'duplicate submission is ignored while a request is pending',
       () async {
         final repository = _PendingChatRepository();
-        final controller = ChatController(repository);
+        final controller = ChatController(repository)
+          ..setProvider(AiProvider.ollama);
 
         final first = controller.sendMessage('First');
         final second = await controller.sendMessage('Second');
         expect(controller.state.isSubmitting, isTrue);
+        controller.setProvider(AiProvider.gemini);
+        expect(controller.state.provider, AiProvider.ollama);
+        expect(controller.state.canChangeProvider, isFalse);
         expect(controller.state.messages.last.status, MessageStatus.sending);
         expect(controller.state.messages.last.analysis, isNull);
         repository.complete(_analysis);
@@ -315,6 +396,7 @@ void main() {
 
         expect(second, isFalse);
         expect(repository.messages, ['First']);
+        expect(repository.providers, [AiProvider.ollama]);
         controller.dispose();
       },
     );
@@ -326,11 +408,14 @@ void main() {
 
       final pending = controller.sendMessage('Old question');
       controller.resetChat();
+      controller.setProvider(AiProvider.ollama);
       repository.complete(_analysis);
       await pending;
 
       expect(controller.state.messages, isEmpty);
       expect(controller.state.isSubmitting, isFalse);
+      expect(controller.state.provider, AiProvider.ollama);
+      expect(controller.state.canChangeProvider, isTrue);
     });
   });
 }
@@ -342,20 +427,24 @@ class _FakeChatRepository implements ChatRepository {
   Object? error;
   final List<String> messages = [];
   final List<String> conversationIds = [];
+  final providers = <AiProvider>[];
 
   @override
   Stream<ChatStreamEvent> streamMessage(
     String message,
     String conversationId, {
+    required AiProvider provider,
     Future<void>? abortTrigger,
   }) => throw UnimplementedError();
 
   @override
   Future<BusinessAnalysis> sendMessage(
     String message,
-    String conversationId,
-  ) async {
+    String conversationId, {
+    required AiProvider provider,
+  }) async {
     messages.add(message);
+    providers.add(provider);
     conversationIds.add(conversationId);
     if (error != null) throw error!;
     return response!;
@@ -364,18 +453,25 @@ class _FakeChatRepository implements ChatRepository {
 
 class _PendingChatRepository implements ChatRepository {
   final messages = <String>[];
+  final providers = <AiProvider>[];
   final _completer = Completer<BusinessAnalysis>();
 
   @override
   Stream<ChatStreamEvent> streamMessage(
     String message,
     String conversationId, {
+    required AiProvider provider,
     Future<void>? abortTrigger,
   }) => throw UnimplementedError();
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message, String conversationId) {
+  Future<BusinessAnalysis> sendMessage(
+    String message,
+    String conversationId, {
+    required AiProvider provider,
+  }) {
     messages.add(message);
+    providers.add(provider);
     return _completer.future;
   }
 
@@ -386,15 +482,18 @@ Future<void> _flush() => Future<void>.delayed(Duration.zero);
 
 class _StreamingRepository implements ChatRepository {
   final ids = <String>[];
+  final providers = <AiProvider>[];
   final modes = <ChatMode>[];
   final streams = <StreamController<ChatStreamEvent>>[];
 
   @override
   Future<BusinessAnalysis> sendMessage(
     String message,
-    String conversationId,
-  ) async {
+    String conversationId, {
+    required AiProvider provider,
+  }) async {
     ids.add(conversationId);
+    providers.add(provider);
     modes.add(ChatMode.structured);
     return _analysis;
   }
@@ -403,9 +502,11 @@ class _StreamingRepository implements ChatRepository {
   Stream<ChatStreamEvent> streamMessage(
     String message,
     String conversationId, {
+    required AiProvider provider,
     Future<void>? abortTrigger,
   }) {
     ids.add(conversationId);
+    providers.add(provider);
     modes.add(ChatMode.streaming);
     final events = StreamController<ChatStreamEvent>();
     streams.add(events);

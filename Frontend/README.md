@@ -4,7 +4,9 @@ Desktop-first Flutter client for the backend's two AI chat endpoints. The
 current implementation provides sales, inventory, and customer purchase analysis
 through the existing chat flow.
 The sidebar's Chat Mode section selects Structured Chat or Streaming Chat.
-Both modes share one chat screen, composer, and conversation.
+Both modes share one chat screen, composer, and conversation. The compact AI
+provider menu in the composer selects Gemini (the default) or Ollama, with a
+checkmark identifying the selection.
 
 ## Prerequisites
 
@@ -51,7 +53,13 @@ address reachable from that device instead of `localhost`.
   products, stock for a product ID, and last month's sales. Selecting one fills
   the composer; Send or Enter submits it through the same chat flow.
 - Enter sends a message; Shift+Enter inserts a newline.
-- Trims messages and sends them with a stable UUID v4 conversation ID as JSON to the selected endpoint. Follow-up requests and mode switches reuse that ID.
+- Trims messages and sends them with a stable UUID v4 conversation ID and the
+  selected `provider` as JSON to the selected endpoint. Follow-up requests,
+  retries, and mode switches reuse that ID and provider.
+- The provider is pinned on the first send attempt, including failed requests,
+  because the backend can save the provider before generation fails. The menu
+  stays locked during and after the response; its tooltip explains that changing
+  provider requires New Chat.
 - Renders structured `summary`, `insights`, and `recommendations` inside the
   existing assistant message. Empty list sections are hidden.
 - Streaming Chat consumes JSON SSE events from `POST /api/chat/stream` and appends
@@ -63,7 +71,9 @@ address reachable from that device instead of `localhost`.
   disposal aborts an active stream; late responses cannot update the new chat.
 - Converts timeouts, network failures, unsuccessful responses, malformed
   payloads, and empty summaries into safe inline errors with Retry.
-- New Chat resets local state, creates a new UUID v4 conversation ID, clears the composer, and preserves the selected mode.
+- New Chat resets local state, creates a new UUID v4 conversation ID, clears the
+  composer, and preserves the selected mode and provider. The provider menu is
+  unlocked for the new conversation.
 - The sidebar lists example questions, not persisted conversation history.
 - Business data, sales, and inventory analysis are marked available. The backend
   persists conversation history and a bounded AI context, but the frontend has
@@ -88,11 +98,19 @@ recommendation. The frontend renders those fields through the same assistant
 widget in Structured Chat. Streaming Chat shows the generated text and subtle
 tool progress; neither mode implements separate domain filtering.
 
-The backend endpoint accepts `{"conversationId":"...","query":"..."}` and returns
+The frontend sends `{"conversationId":"...","query":"...","provider":"gemini"}`
+or `"provider":"ollama"` to both endpoints. Structured Chat returns
 `{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
 null lists become empty lists; blank list entries are omitted. Invalid field
 types and blank summaries produce safe inline errors with Retry. Calling it
-sends the message to Gemini and may incur API usage costs.
+sends the message to the conversation's saved Gemini or Ollama provider; Gemini
+may incur API usage costs. Provider labels and wire values live in one typed
+`AiProvider` enum; the controller passes it through the existing repository and
+remote data source. The client explicitly selects Gemini initially, independent
+of any backend default override. The backend rejects provider changes for an
+existing conversation with HTTP 409. Responses do not expose the saved provider;
+the current frontend creates its own conversation IDs and has no history/resume
+flow, so it retains the provider locally for the lifetime of each conversation.
 
 `POST /api/chat` now returns the structured analysis directly. The previous
 separate business-analysis route and free-form `response` contract are removed.
@@ -136,6 +154,11 @@ flutter test
 flutter build web \
   --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
+
+Tests cover both provider choices and checkmarks, exact request serialization
+for both endpoints, provider pinning during and after requests (including
+failures/retries), follow-up messages, and New Chat reset/cancellation. Existing
+structured rendering, streaming, mode, retry, and prompt tests remain in place.
 
 ## Container image
 

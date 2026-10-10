@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/api_exception.dart';
+import '../../domain/entities/ai_provider.dart';
 import '../../domain/entities/business_analysis.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_stream_event.dart';
@@ -21,6 +22,11 @@ class ChatController extends StateNotifier<ChatState> {
   void setMode(ChatMode mode) {
     if (!mounted || state.isSubmitting) return;
     state = state.copyWith(mode: mode);
+  }
+
+  void setProvider(AiProvider provider) {
+    if (!mounted || !state.canChangeProvider) return;
+    state = state.copyWith(provider: provider);
   }
 
   @override
@@ -41,6 +47,7 @@ class ChatController extends StateNotifier<ChatState> {
 
     final now = DateTime.now();
     final conversationId = _conversationId;
+    final provider = state.provider;
     final assistantId = _nextId('assistant');
     final streaming = state.mode == ChatMode.streaming;
     final responseText = StringBuffer();
@@ -48,6 +55,9 @@ class ChatController extends StateNotifier<ChatState> {
     _activeAbort = abort;
     state = state.copyWith(
       isSubmitting: true,
+      // The backend pins the conversation before generating a response, so
+      // failed requests and retries must retain this provider too.
+      isProviderPinned: true,
       clearLastFailedPrompt: true,
       messages: [
         ...state.messages,
@@ -73,6 +83,7 @@ class ChatController extends StateNotifier<ChatState> {
         await for (final event in _repository.streamMessage(
           prompt,
           conversationId,
+          provider: provider,
           abortTrigger: abort!.future,
         )) {
           if (!mounted || conversationId != _conversationId) return true;
@@ -125,7 +136,11 @@ class ChatController extends StateNotifier<ChatState> {
           'The response was interrupted before completion. Please try again.',
         );
       }
-      final response = await _repository.sendMessage(prompt, conversationId);
+      final response = await _repository.sendMessage(
+        prompt,
+        conversationId,
+        provider: provider,
+      );
       if (!mounted || conversationId != _conversationId) return true;
       _replaceAssistant(
         assistantId,
@@ -177,9 +192,10 @@ class ChatController extends StateNotifier<ChatState> {
 
   void resetChat() {
     final mode = state.mode;
+    final provider = state.provider;
     _cancelStream();
     _conversationId = _newConversationId();
-    state = ChatState(mode: mode);
+    state = ChatState(mode: mode, provider: provider);
   }
 
   void _setFailure(

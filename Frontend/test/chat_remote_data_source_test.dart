@@ -3,12 +3,41 @@ import 'package:ai_business_assistant/core/network/api_client.dart';
 import 'package:ai_business_assistant/core/network/api_exception.dart';
 import 'package:ai_business_assistant/features/chat/data/datasources/chat_remote_data_source.dart';
 import 'package:ai_business_assistant/features/chat/data/repositories/chat_repository_impl.dart';
-import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_controller.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/ai_provider.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
+import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_controller.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final (provider, wireValue) in [
+    (AiProvider.gemini, 'gemini'),
+    (AiProvider.ollama, 'ollama'),
+  ]) {
+    test('structured requests serialize $wireValue on every message', () async {
+      final client = _RecordingApiClient({'summary': 'All good.'});
+      addTearDown(client.close);
+      final controller = ChatController(
+        ChatRepositoryImpl(ChatRemoteDataSource(client)),
+      )..setProvider(provider);
+      addTearDown(controller.dispose);
+      await controller.sendMessage('  First  ');
+      await controller.sendMessage('Follow-up');
+      final first = client.requestBodies.first as Map<String, String>;
+      expect(first, {
+        'conversationId': first['conversationId'],
+        'query': 'First',
+        'provider': wireValue,
+      });
+      expect(client.requestBodies.last, {
+        'conversationId': first['conversationId'],
+        'query': 'Follow-up',
+        'provider': wireValue,
+      });
+      expect(client.lastPath, '/api/chat');
+    });
+  }
+
   test(
     'posts the trimmed query and preserves structured response fields',
     () async {
@@ -17,9 +46,11 @@ void main() {
         'insights': [' Low stock ', '  '],
         'recommendations': [' Restock soon. '],
       });
-      final response = await ChatRemoteDataSource(
-        client,
-      ).sendMessage(' Stock? ', 'conversation-123');
+      final response = await ChatRemoteDataSource(client).sendMessage(
+        ' Stock? ',
+        'conversation-123',
+        provider: AiProvider.gemini,
+      );
 
       expect(response.summary, 'Stock needs attention.');
       expect(response.insights, ['Low stock']);
@@ -28,6 +59,7 @@ void main() {
       expect(client.lastData, <String, String>{
         'conversationId': 'conversation-123',
         'query': 'Stock?',
+        'provider': 'gemini',
       });
       final domain = response.toDomain();
       expect(domain.summary, response.summary);
@@ -44,7 +76,7 @@ void main() {
     test('handles absent or empty lists: $lists', () async {
       final response = await ChatRemoteDataSource(
         _RecordingApiClient({'summary': 'No issues.', ...lists}),
-      ).sendMessage('Status?', 'conversation-123');
+      ).sendMessage('Status?', 'conversation-123', provider: AiProvider.gemini);
       expect(response.insights, isEmpty);
       expect(response.recommendations, isEmpty);
     });
@@ -73,7 +105,11 @@ void main() {
         _RecordingApiClient(malformedPayloads[i]),
       );
       await expectLater(
-        source.sendMessage('Status?', 'conversation-123'),
+        source.sendMessage(
+          'Status?',
+          'conversation-123',
+          provider: AiProvider.gemini,
+        ),
         throwsA(
           isA<ApiException>().having(
             (e) => e.type,
@@ -90,7 +126,11 @@ void main() {
       _RecordingApiClient({'summary': ' \n '}),
     );
     await expectLater(
-      source.sendMessage('Status?', 'conversation-123'),
+      source.sendMessage(
+        'Status?',
+        'conversation-123',
+        provider: AiProvider.gemini,
+      ),
       throwsA(
         isA<ApiException>().having(
           (e) => e.type,
@@ -104,7 +144,9 @@ void main() {
   test('empty query never reaches the API', () async {
     final client = _RecordingApiClient(null);
     await expectLater(
-      ChatRemoteDataSource(client).sendMessage('  ', 'conversation-123'),
+      ChatRemoteDataSource(
+        client,
+      ).sendMessage('  ', 'conversation-123', provider: AiProvider.gemini),
       throwsA(isA<ApiException>()),
     );
     expect(client.lastPath, isNull);
@@ -141,7 +183,11 @@ void main() {
         ),
       );
       await expectLater(
-        source.sendMessage('Stock?', 'conversation-123'),
+        source.sendMessage(
+          'Stock?',
+          'conversation-123',
+          provider: AiProvider.gemini,
+        ),
         throwsA(
           isA<ApiException>()
               .having((e) => e.type, 'type', failure.$2)
@@ -196,11 +242,13 @@ class _RecordingApiClient extends ApiClient {
   Object? payload;
   String? lastPath;
   Object? lastData;
+  final requestBodies = <Object?>[];
 
   @override
   Future<Response<dynamic>> post(String path, {Object? data}) async {
     lastPath = path;
     lastData = data;
+    requestBodies.add(data);
     return Response<dynamic>(
       data: payload,
       requestOptions: RequestOptions(path: path),

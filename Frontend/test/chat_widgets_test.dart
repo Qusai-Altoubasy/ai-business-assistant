@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_business_assistant/app/theme/app_theme.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/ai_provider.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/business_analysis.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_stream_event.dart';
@@ -8,12 +9,151 @@ import 'package:ai_business_assistant/features/chat/domain/repositories/chat_rep
 import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_providers.dart';
 import 'package:ai_business_assistant/features/chat/presentation/pages/chat_page.dart';
 import 'package:ai_business_assistant/features/chat/presentation/widgets/assistant_message_card.dart';
+import 'package:ai_business_assistant/features/chat/presentation/widgets/chat_input.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('provider menu selects Ollama and Gemini with a checkmark', (
+    tester,
+  ) async {
+    await _pumpChat(tester, _PendingRepository());
+    expect(_providerMenu(tester).enabled, isTrue);
+    expect(find.text('Gemini'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('ai-provider-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('ai-provider-option-gemini')),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('ai-provider-option-ollama')));
+    await tester.pumpAndSettle();
+    expect(find.text('Ollama'), findsOneWidget);
+    expect(find.text('Gemini'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('ai-provider-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('ai-provider-option-ollama')),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('ai-provider-option-gemini')));
+    await tester.pumpAndSettle();
+    expect(find.text('Gemini'), findsOneWidget);
+    expect(find.text('Ollama'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('structured requests lock the provider until New Chat', (
+    tester,
+  ) async {
+    final repository = _PendingRepository();
+    await _pumpChat(tester, repository);
+    await tester.tap(find.byKey(const Key('ai-provider-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('ai-provider-option-ollama')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'First');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-button')));
+    await tester.pump();
+    expect(repository.providers, [AiProvider.ollama]);
+    expect(_providerMenu(tester).enabled, isFalse);
+    await tester.tap(find.byKey(const Key('ai-provider-selector')));
+    await tester.pump();
+    expect(find.byKey(const Key('ai-provider-option-gemini')), findsNothing);
+    repository.result.complete(const BusinessAnalysis(summary: 'Answer'));
+    await tester.pumpAndSettle();
+    expect(_providerMenu(tester).enabled, isFalse);
+    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    expect(
+      _providerMenu(tester).tooltip,
+      'Start a new chat to change AI provider.',
+    );
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Follow-up');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-button')));
+    await tester.pumpAndSettle();
+    expect(repository.providers, [AiProvider.ollama, AiProvider.ollama]);
+    expect(repository.ids.first, repository.ids.last);
+
+    await tester.tap(find.byKey(const Key('new-chat-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Answer'), findsNothing);
+    expect(find.text('Ollama'), findsOneWidget);
+    expect(_providerMenu(tester).enabled, isTrue);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('chat-input')))
+          .controller!
+          .text,
+      isEmpty,
+    );
+    await tester.tap(find.byKey(const Key('ai-provider-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('ai-provider-option-gemini')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'New conversation',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-button')));
+    await tester.pumpAndSettle();
+    expect(repository.providers.last, AiProvider.gemini);
+    expect(repository.ids.first, isNot(repository.ids.last));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'compact provider control fits a narrow composer and disables while busy',
+    (tester) async {
+      final input = TextEditingController();
+      final focus = FocusNode();
+      addTearDown(input.dispose);
+      addTearDown(focus.dispose);
+      Future<void> show({required bool submitting}) => tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 288,
+                child: ChatInput(
+                  controller: input,
+                  focusNode: focus,
+                  onSend: () {},
+                  isSubmitting: submitting,
+                  provider: AiProvider.gemini,
+                  isProviderPinned: false,
+                  onProviderChanged: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await show(submitting: false);
+      expect(_providerMenu(tester).enabled, isTrue);
+      expect(tester.takeException(), isNull);
+      await show(submitting: true);
+      expect(_providerMenu(tester).enabled, isFalse);
+      await tester.tap(find.byKey(const Key('ai-provider-selector')));
+      await tester.pump();
+      expect(find.byKey(const Key('ai-provider-option-ollama')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets(
     'Streaming mode uses the shared composer and one progressive assistant card',
     (tester) async {
@@ -48,6 +188,11 @@ void main() {
       await tester.tap(find.byKey(const Key('send-button')));
       await tester.pump();
       expect(repository.streamMessages, [prompt]);
+      expect(repository.providers, [AiProvider.gemini]);
+      expect(_providerMenu(tester).enabled, isFalse);
+      await tester.tap(find.byKey(const Key('ai-provider-selector')));
+      await tester.pump();
+      expect(find.byKey(const Key('ai-provider-option-ollama')), findsNothing);
       expect(repository.messages, isEmpty);
       repository.events.add(
         const ChatStreamEvent(
@@ -87,11 +232,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.text('Receiving response…'), findsNothing);
+      expect(_providerMenu(tester).enabled, isFalse);
       await tester.tap(find.byKey(const Key('new-chat-button')));
       await tester.pumpAndSettle();
       expect(find.text('Hello world'), findsNothing);
       expect(find.text('Live streaming · Business analysis'), findsOneWidget);
       expect(find.text(prompt), findsOneWidget);
+      expect(find.text('Gemini'), findsOneWidget);
+      expect(_providerMenu(tester).enabled, isTrue);
       expect(tester.takeException(), isNull);
     },
   );
@@ -291,6 +439,8 @@ void main() {
 
 class _PendingRepository implements ChatRepository {
   final messages = <String>[];
+  final providers = <AiProvider>[];
+  final ids = <String>[];
   final result = Completer<BusinessAnalysis>();
   final streamMessages = <String>[];
   final events = StreamController<ChatStreamEvent>();
@@ -299,9 +449,12 @@ class _PendingRepository implements ChatRepository {
   Stream<ChatStreamEvent> streamMessage(
     String message,
     String conversationId, {
+    required AiProvider provider,
     Future<void>? abortTrigger,
   }) {
     streamMessages.add(message);
+    providers.add(provider);
+    ids.add(conversationId);
     abortTrigger?.then((_) {
       if (!events.isClosed) events.close();
     });
@@ -309,8 +462,41 @@ class _PendingRepository implements ChatRepository {
   }
 
   @override
-  Future<BusinessAnalysis> sendMessage(String message, String conversationId) {
+  Future<BusinessAnalysis> sendMessage(
+    String message,
+    String conversationId, {
+    required AiProvider provider,
+  }) {
     messages.add(message);
+    providers.add(provider);
+    ids.add(conversationId);
     return result.future;
   }
+}
+
+PopupMenuButton<AiProvider> _providerMenu(WidgetTester tester) =>
+    tester.widget<PopupMenuButton<AiProvider>>(
+      find.byKey(const Key('ai-provider-selector')),
+    );
+
+Future<void> _pumpChat(WidgetTester tester, ChatRepository repository) async {
+  tester.view.physicalSize = const Size(1400, 1200);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [chatRepositoryProvider.overrideWithValue(repository)],
+      child: MaterialApp(
+        theme: AppTheme.light,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(0.85)),
+          child: child!,
+        ),
+        home: const ChatPage(),
+      ),
+    ),
+  );
 }

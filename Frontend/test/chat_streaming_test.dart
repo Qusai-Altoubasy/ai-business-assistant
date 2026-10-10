@@ -5,12 +5,66 @@ import 'package:ai_business_assistant/core/config/app_config.dart';
 import 'package:ai_business_assistant/core/network/api_client.dart';
 import 'package:ai_business_assistant/core/network/api_exception.dart';
 import 'package:ai_business_assistant/features/chat/data/datasources/chat_remote_data_source.dart';
+import 'package:ai_business_assistant/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/ai_provider.dart';
+import 'package:ai_business_assistant/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_business_assistant/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_controller.dart';
+import 'package:ai_business_assistant/features/chat/presentation/controllers/chat_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  for (final (provider, wireValue) in [
+    (AiProvider.gemini, 'gemini'),
+    (AiProvider.ollama, 'ollama'),
+  ]) {
+    test('streaming requests serialize $wireValue on every message', () async {
+      final requests = <Map<String, dynamic>>[];
+      final client = ApiClient(
+        config: const AppConfig(apiBaseUrl: 'http://localhost:8080'),
+        streamingClient: MockClient.streaming((request, body) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/chat/stream');
+          requests.add(
+            jsonDecode(await utf8.decoder.bind(body).join())
+                as Map<String, dynamic>,
+          );
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode('data: {"type":"DONE","content":null}\n\n'),
+            ),
+            200,
+            headers: {'content-type': 'text/event-stream'},
+          );
+        }),
+      );
+      addTearDown(client.close);
+      final controller =
+          ChatController(ChatRepositoryImpl(ChatRemoteDataSource(client)))
+            ..setMode(ChatMode.streaming)
+            ..setProvider(provider);
+      addTearDown(controller.dispose);
+      await controller.sendMessage('  First  ');
+      await controller.sendMessage('Follow-up');
+      expect(requests, [
+        {
+          'conversationId': requests.first['conversationId'],
+          'query': 'First',
+          'provider': wireValue,
+        },
+        {
+          'conversationId': requests.first['conversationId'],
+          'query': 'Follow-up',
+          'provider': wireValue,
+        },
+      ]);
+      expect(controller.state.isSubmitting, isFalse);
+      expect(controller.state.messages.last.status, MessageStatus.success);
+    });
+  }
+
   test(
     'POST SSE handles fragmented UTF-8, CRLF, comments and multiline data',
     () async {
@@ -23,6 +77,7 @@ void main() {
           expect(jsonDecode(await utf8.decoder.bind(body).join()), {
             'conversationId': '550e8400-e29b-41d4-a716-446655440000',
             'query': 'Stock?',
+            'provider': 'gemini',
           });
           const wire =
               ': heartbeat\r\nid: 1\r\nevent: message\r\n'
@@ -37,7 +92,11 @@ void main() {
       );
       addTearDown(client.close);
       final events = await ChatRemoteDataSource(client)
-          .streamMessage('  Stock?  ', '550e8400-e29b-41d4-a716-446655440000')
+          .streamMessage(
+            '  Stock?  ',
+            '550e8400-e29b-41d4-a716-446655440000',
+            provider: AiProvider.gemini,
+          )
           .toList();
       expect(events.map((event) => event.type), [
         StreamEventType.chunk,
@@ -69,7 +128,7 @@ void main() {
       final first = Completer<ChatStreamEvent>();
       final finished = Completer<void>();
       ChatRemoteDataSource(client)
-          .streamMessage('Question', 'id')
+          .streamMessage('Question', 'id', provider: AiProvider.gemini)
           .listen(
             (event) {
               if (!first.isCompleted) first.complete(event);
@@ -107,7 +166,9 @@ void main() {
         );
         addTearDown(client.close);
         await expectLater(
-          ChatRemoteDataSource(client).streamMessage('Question', 'id').toList(),
+          ChatRemoteDataSource(client)
+              .streamMessage('Question', 'id', provider: AiProvider.gemini)
+              .toList(),
           throwsA(
             isA<ApiException>().having(
               (e) => e.type,
@@ -134,7 +195,9 @@ void main() {
       );
       addTearDown(client.close);
       await expectLater(
-        ChatRemoteDataSource(client).streamMessage('Question', 'id').toList(),
+        ChatRemoteDataSource(
+          client,
+        ).streamMessage('Question', 'id', provider: AiProvider.gemini).toList(),
         throwsA(
           isA<ApiException>().having(
             (e) => e.userMessage,
