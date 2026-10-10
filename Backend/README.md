@@ -272,6 +272,8 @@ Stop dev mode before starting the packaged application. Keep the entire `target/
 
 The suite includes chat endpoint/provider selection, provider migration, business-persistence, conversation-memory persistence, customer-tool, and turn-aware memory tests. The turn-aware tests verify whole-turn eviction, system-message retention, and rejection of a persisted window that starts mid-turn. Tests do not call Gemini or Ollama or evaluate live model tool selection/response quality. Database tests require a development database with the original seed data. Persistence test transactions roll back; endpoint tests commit their chat records, and identity sequences still advance. Prefer a disposable database for the suite.
 
+CI ([backend-ci.yml](../.github/workflows/backend-ci.yml)) runs the backend tests against a disposable PostgreSQL 18 service on every push to `main` and every pull request that changes `Backend/`.
+
 ## API
 
 Both endpoints consume `application/json` and accept `{"conversationId":"...","query":"...","provider":"ollama"}`. `provider` is optional and accepts `gemini` or `ollama`, case-insensitively. `/api/chat` produces JSON; `/api/chat/stream` produces `text/event-stream`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query and context to the saved provider and Gemini may incur API usage costs.
