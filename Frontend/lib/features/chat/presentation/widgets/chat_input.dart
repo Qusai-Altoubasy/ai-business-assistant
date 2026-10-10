@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../../domain/entities/ai_provider.dart';
+import 'ai_provider_selector.dart';
 
 class ChatInput extends StatefulWidget {
   const ChatInput({
@@ -12,12 +14,18 @@ class ChatInput extends StatefulWidget {
     required this.focusNode,
     required this.onSend,
     required this.isSubmitting,
+    required this.provider,
+    required this.isProviderPinned,
+    required this.onProviderChanged,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onSend;
   final bool isSubmitting;
+  final AiProvider provider;
+  final bool isProviderPinned;
+  final ValueChanged<AiProvider> onProviderChanged;
 
   @override
   State<ChatInput> createState() => _ChatInputState();
@@ -96,29 +104,42 @@ class _ChatInputState extends State<ChatInput> {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              key: const Key('send-button'),
-              onPressed: canSend ? _sendIfValid : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: AppColors.outlineSoft,
-                visualDensity: VisualDensity.compact,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AiProviderSelector(
+                    provider: widget.provider,
+                    isPinned: widget.isProviderPinned,
+                    isSubmitting: widget.isSubmitting,
+                    onSelected: widget.onProviderChanged,
+                  ),
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(widget.isSubmitting ? 'Sending…' : 'Send'),
-                  const SizedBox(width: 6),
-                  const Text('↵', style: AppTextStyles.mono),
-                ],
+              const SizedBox(width: AppSpacing.xs),
+              FilledButton(
+                key: const Key('send-button'),
+                onPressed: canSend ? _sendIfValid : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.outlineSoft,
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(widget.isSubmitting ? 'Sending…' : 'Send'),
+                    const SizedBox(width: 6),
+                    const Text('↵', style: AppTextStyles.mono),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),

@@ -2,8 +2,9 @@ import 'dart:convert';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/api_exception.dart';
-import '../models/business_analysis_response.dart';
+import '../../domain/entities/ai_provider.dart';
 import '../../domain/entities/chat_stream_event.dart';
+import '../models/business_analysis_response.dart';
 
 class ChatRemoteDataSource {
   const ChatRemoteDataSource(this._apiClient);
@@ -13,6 +14,7 @@ class ChatRemoteDataSource {
   Stream<ChatStreamEvent> streamMessage(
     String message,
     String conversationId, {
+    required AiProvider provider,
     Future<void>? abortTrigger,
   }) async* {
     final normalized = message.trim();
@@ -25,7 +27,11 @@ class ChatRemoteDataSource {
     final lines = _apiClient
         .postStream(
           '/api/chat/stream',
-          data: {'conversationId': conversationId, 'query': normalized},
+          data: {
+            'conversationId': conversationId,
+            'query': normalized,
+            'provider': provider.apiValue,
+          },
           abortTrigger: abortTrigger,
         )
         .transform(utf8.decoder)
@@ -60,8 +66,9 @@ class ChatRemoteDataSource {
 
   Future<BusinessAnalysisResponse> sendMessage(
     String message,
-    String conversationId,
-  ) async {
+    String conversationId, {
+    required AiProvider provider,
+  }) async {
     final normalized = message.trim();
     if (normalized.isEmpty) {
       throw const ApiException(
@@ -75,6 +82,7 @@ class ChatRemoteDataSource {
       data: <String, String>{
         'conversationId': conversationId,
         'query': normalized,
+        'provider': provider.apiValue,
       },
     );
     return BusinessAnalysisResponse.fromJson(response.data);

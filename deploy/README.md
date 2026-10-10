@@ -61,9 +61,11 @@ Both accept `{"conversationId":"<UUID>","query":"..."}` with an optional
 first request, defaulting to `AI_DEFAULT_PROVIDER` when omitted. Follow-ups use
 the saved provider; requesting another for the same UUID returns HTTP 409 before
 generation or SSE. Start a new chat to change providers. Unknown or blank values
-return HTTP 400. The Flutter client currently omits the optional `provider` field, so new
-chats use the backend default. API clients can select either provider explicitly. Both providers share the
-business prompt, tools, and PostgreSQL memory. Structured Chat returns `summary`, `insights`, and `recommendations` as JSON; Streaming Chat
+return HTTP 400. Flutter explicitly sends the composer’s selected provider on
+every request, starting with Gemini. The menu locks after the first send attempt;
+New Chat unlocks it and retains the current selection. Both providers share the
+business prompt, tools, and PostgreSQL memory. Structured Chat returns `summary`,
+`insights`, and `recommendations` as JSON; Streaming Chat
 returns JSON SSE events that progressively update one assistant message. Nginx
 disables buffering for `/api/` so chunks can reach the browser as they arrive.
 Flutter reuses the UUID for follow-up questions and mode switches, and creates
