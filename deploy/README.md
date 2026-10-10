@@ -28,6 +28,10 @@ The deployment uses:
 | `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS |
 | `GEMINI_API_KEY` | Gemini Developer API key; set this only in `.env` |
 | `GEMINI_MODEL` | Gemini chat model ID |
+| `AI_DEFAULT_PROVIDER` | Provider for new chats; defaults to `GEMINI` |
+| `OLLAMA_BASE_URL` | Ollama origin without `/api/chat`; defaults to `https://ai.llm.ensera.dev` |
+| `OLLAMA_MODEL` | Deployed Ollama model; defaults to `qwen3-vl:8b-instruct-q8_0` |
+| `OLLAMA_TIMEOUT` | Ollama request timeout; defaults to `120s` |
 | `POSTGRES_DB` | Database created on first initialization; default `ai_business_assistant` |
 | `POSTGRES_USER` | Database user; default `ai_business_assistant` |
 | `POSTGRES_PASSWORD` | Database password; local development default `dev_password` |
@@ -52,8 +56,14 @@ Open the frontend at <http://127.0.0.1:3000>. The backend exposes
 `POST http://127.0.0.1:8080/api/chat` and
 `POST http://127.0.0.1:8080/api/chat/stream`.
 
-Both accept `{"conversationId":"<UUID>","query":"..."}`. Structured Chat
-returns `summary`, `insights`, and `recommendations` as JSON; Streaming Chat
+Both accept `{"conversationId":"<UUID>","query":"..."}` with an optional
+`"provider":"gemini"` or `"provider":"ollama"`. The provider is saved on the
+first request, defaulting to `AI_DEFAULT_PROVIDER` when omitted. Follow-ups use
+the saved provider; requesting another for the same UUID returns HTTP 409 before
+generation or SSE. Start a new chat to change providers. Unknown or blank values
+return HTTP 400. The Flutter client currently omits the optional `provider` field, so new
+chats use the backend default. API clients can select either provider explicitly. Both providers share the
+business prompt, tools, and PostgreSQL memory. Structured Chat returns `summary`, `insights`, and `recommendations` as JSON; Streaming Chat
 returns JSON SSE events that progressively update one assistant message. Nginx
 disables buffering for `/api/` so chunks can reach the browser as they arrive.
 Flutter reuses the UUID for follow-up questions and mode switches, and creates
@@ -88,7 +98,8 @@ only when this volume is empty, so changing `POSTGRES_*` does not update an
 existing database.
 
 Flyway runs V1 (four business tables), V2 (10 products, 5 customers, 12 orders,
-24 order items), and V3 (conversation history and active chat memory tables) on
+24 order items), V3 (conversation history and active chat memory tables), and V4
+(saved AI provider; existing conversations receive `GEMINI`) on
 backend startup. Hibernate validates the resulting schema.
 Flyway creates tables inside the database, not the database itself.
 
@@ -110,6 +121,13 @@ From `deploy/`, rebuild and recreate the application containers:
 ```bash
 docker compose up -d --build backend frontend
 ```
+
+An Ollama response containing `upstream request timeout` can originate from the
+remote service or a gateway in front of it. Check those logs and test the
+configured `OLLAMA_BASE_URL` directly with its `/api/chat` endpoint. Increasing
+the application's `OLLAMA_TIMEOUT` does not override a remote gateway's timeout.
+The backend logs the selected provider and request duration to help distinguish
+an Ollama failure from a successful Gemini request.
 
 To bypass Docker build-layer cache and check for newer base images:
 

@@ -7,6 +7,10 @@ services:
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL}
+      AI_DEFAULT_PROVIDER: ${AI_DEFAULT_PROVIDER:-GEMINI}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ai.llm.ensera.dev}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3-vl:8b-instruct-q8_0}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-120s}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       DB_USERNAME: ${POSTGRES_USER:-ai_business_assistant}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}

@@ -1,6 +1,6 @@
 # AI Business Assistant — Backend
 
-The Quarkus backend for AI Business Assistant. It exposes Gemini-backed structured and streaming chat endpoints and reads business data from PostgreSQL.
+The Quarkus backend for AI Business Assistant. It exposes structured and streaming chat endpoints backed by Gemini or the company's Ollama server and reads business data from PostgreSQL.
 
 Resource-based prompting, structured output, PostgreSQL-backed conversation history and turn-aware memory, and read-only inventory, sales, customer statistics, and current-date tools are implemented. Embeddings, pgvector, RAG, and further reliability/evaluation remain future stages. See the [project overview](../README.md) and [deployment guide](../deploy/README.md) for the wider application.
 
@@ -8,7 +8,7 @@ Resource-based prompting, structured output, PostgreSQL-backed conversation hist
 
 - Java 21 and Quarkus 3.39.3
 - Quarkus REST with Jackson
-- LangChain4j AI Services with Google Gemini Developer API
+- LangChain4j AI Services with Google Gemini Developer API and Ollama
 - PostgreSQL 18, blocking JDBC, and Hibernate ORM with Panache
 - Flyway for schema migrations and seed data
 - Maven 3.9.11 via the wrapper and a multi-stage Docker build
@@ -19,7 +19,8 @@ Quarkus and LangChain4j dependencies use the BOMs in [pom.xml](pom.xml). The Pos
 
 - `POST /api/chat` returns `BusinessAnalysisDTO` with `summary`, `insights`, and `recommendations`.
 - `POST /api/chat/stream` streams JSON SSE events using the same tools and persistent conversation memory.
-- `BusinessAnalysisService` uses `@RegisterAiService`, `@SystemMessage`, `@UserMessage`, and `@MemoryId` to keep conversations separate.
+- `BusinessAnalysisService` is the shared contract. Provider-specific adapters delegate to `GeminiAiService` and `OllamaAiService`, which use named `@RegisterAiService` models, the shared prompt/tools, and `@MemoryId`.
+- An optional request `provider` chooses Gemini or Ollama for a new conversation. The selection is saved and fixed for all follow-ups; the configured default is used only when creating a conversation without a selection.
 - PostgreSQL stores successful user/assistant exchanges and the active context window. The window retains the latest 10 whole user turns and the system message.
 - Inventory tools read low-stock products and stock for an individual product ID through `ProductRepository`.
 - Sales tools aggregate recorded order amounts and order count for an inclusive date range through `OrderRepository`.
@@ -51,7 +52,10 @@ Backend/
 │   │   ├── ChatResource.java
 │   │   ├── ChatService.java
 │   │   ├── ai/
-│   │   │   └── BusinessAnalysisService.java
+│   │   │   ├── BusinessAnalysisService.java
+│   │   │   ├── AiProvider.java / AiProviderSelector.java
+│   │   │   ├── GeminiAiService.java / OllamaAiService.java
+│   │   │   └── GeminiBusinessAnalysisService.java / OllamaBusinessAnalysisService.java
 │   │   ├── dto/
 │   │   │   ├── ChatRequestDTO.java
 │   │   │   ├── BusinessAnalysisDTO.java
@@ -85,7 +89,8 @@ Backend/
 │   └── db/migration/
 │       ├── V1__create_business_schema.sql
 │       ├── V2__seed_business_data.sql
-│       └── V3__add_persistent_chat_history.sql
+│       ├── V3__add_persistent_chat_history.sql
+│       └── V4__add_conversation_ai_provider.sql
 ├── src/test/java/com/aibusinessassistant/
 │   ├── chat/ChatResourceTest.java
 │   ├── chat/memory/          # Turn-aware and persistence tests
@@ -103,12 +108,14 @@ Packages group code by business feature. The chat resource, orchestration servic
 ### Request Flow
 
 ```text
-Client JSON conversationId + query
+Client JSON conversationId + query + optional provider
   → ChatResource
   → ChatService
-  → BusinessAnalysisService (@MemoryId)
+  → ConversationHistoryService.findOrCreateConversation → saved provider
+  → AiProviderSelector → provider adapter (BusinessAnalysisService contract)
+  → GeminiAiService / OllamaAiService (@MemoryId)
       ↔ TurnAwareChatMemory → PostgresChatMemoryStore → PostgreSQL chat_memory_state
-  → Google Gemini
+  → Gemini / Ollama
       ↕ when business data is needed
     InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
     CommonTools → current application date
@@ -118,7 +125,7 @@ Client JSON conversationId + query
   → JSON response or JSON SSE events
 ```
 
-`ChatRequestDTO` contains a UUID `conversationId` and `query`. `BusinessAnalysisService` uses `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 whole user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Successful user and assistant exchanges are stored separately in `chat_messages` and are not deleted when turns leave the active window. The AI service is `@ApplicationScoped`, and the PostgreSQL store supplies its memory across requests. `BusinessAnalysisService` registers `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; Gemini decides which to invoke. The structured endpoint returns the final analysis without tool details; the streaming endpoint emits text chunks and tool names, but not tool arguments or results.
+`ChatRequestDTO` contains a UUID `conversationId`, `query`, and optional `provider`. Both provider-specific AI services use `@MemoryId` to select a separate turn-aware chat memory for each conversation. It retains the most recent 10 whole user turns and the system message. The active window is stored in PostgreSQL so it is restored after a backend restart. Successful user and assistant exchanges are stored separately in `chat_messages` and are not deleted when turns leave the active window. The AI services are `@ApplicationScoped`, and the PostgreSQL store supplies their memory across requests. Both register `InventoryTools`, `SalesTools`, `CustomerTools`, and `CommonTools`; the saved provider's model decides which to invoke. The structured endpoint returns the final analysis without tool details; the streaming endpoint emits text chunks and tool names, but not tool arguments or results.
 
 ### Registered Tools
 
@@ -175,6 +182,7 @@ PostgreSQL creates the database using `POSTGRES_DB` on first initialization. Fly
 | [V1__create_business_schema.sql](src/main/resources/db/migration/V1__create_business_schema.sql) | Creates the four tables, identity keys, foreign keys, required columns, unique customer emails, and indexes for relationship/date lookups. |
 | [V2__seed_business_data.sql](src/main/resources/db/migration/V2__seed_business_data.sql) | Inserts 10 products, 5 customers, 12 orders, and 24 order items; advances identity sequences past the explicit seed IDs. |
 | [V3__add_persistent_chat_history.sql](src/main/resources/db/migration/V3__add_persistent_chat_history.sql) | Creates conversations, the append-only user/assistant history table, and the active chat-memory state table. The history role has a database check constraint. |
+| [V4__add_conversation_ai_provider.sql](src/main/resources/db/migration/V4__add_conversation_ai_provider.sql) | Adds the required provider and allowed-value constraint, backfilling legacy conversations with `GEMINI`. |
 
 The fictional seed data spans January–March 2026, includes repeat customers and products below minimum stock, and supports the current sales, inventory, and customer queries. Customer 1 (Maya Reed) has three seeded orders totaling `483.00`, averaging `161.00`. Relative-date questions use the actual backend date, so "last month" may fall outside the seeded period and return no sales. Flyway tracks applied migrations in `flyway_schema_history`. Add new migrations for later changes instead of editing migrations already applied to a database.
 
@@ -198,12 +206,16 @@ The backend reads the following variables through [application.properties](src/m
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Gemini Developer API key | Required |
 | `GEMINI_MODEL` | Gemini chat model ID | Required |
+| `AI_DEFAULT_PROVIDER` | Provider for new conversations without `provider` | `GEMINI` |
+| `OLLAMA_BASE_URL` | Ollama server origin without `/api/chat` | `https://ai.llm.ensera.dev` |
+| `OLLAMA_MODEL` | Company's Ollama model ID | `qwen3-vl:8b-instruct-q8_0` |
+| `OLLAMA_TIMEOUT` | Ollama request timeout | `120s` |
 | `DB_URL` | JDBC connection URL | `jdbc:postgresql://localhost:5432/ai_business_assistant` |
 | `DB_USERNAME` | JDBC username | `ai_business_assistant` |
 | `DB_PASSWORD` | JDBC password | Required; no application default |
 | `FRONTEND_ORIGIN` | Allowed browser CORS origin | `http://127.0.0.1:3000` |
 
-CORS allows `POST`. The test profile provides non-secret Gemini placeholders; database credentials still come from the environment.
+CORS allows `POST`. The test profile provides non-secret placeholders for both named models; database credentials still come from the environment. `GeminiAiService` binds to `business-gemini`; `OllamaAiService` binds to `business-ollama`. Ollama Dev Services are disabled because the backend uses an existing server.
 
 `app.chat.memory.max-turns=10` in `application.properties` controls the number of whole user turns kept in the active context. Older turns remain in `chat_messages` but are no longer sent to the model.
 
@@ -258,11 +270,15 @@ java -jar target/quarkus-app/quarkus-run.jar
 
 Stop dev mode before starting the packaged application. Keep the entire `target/quarkus-app/` directory when distributing the build.
 
-The suite includes chat endpoint, business-persistence, conversation-memory persistence, customer-tool, and turn-aware memory tests. The turn-aware tests verify whole-turn eviction, system-message retention, and rejection of a persisted window that starts mid-turn. Tests do not call Gemini or evaluate model tool selection/response quality. Database tests require a development database with the original seed data. Test inserts roll back, but identity sequences still advance.
+The suite includes chat endpoint/provider selection, provider migration, business-persistence, conversation-memory persistence, customer-tool, and turn-aware memory tests. The turn-aware tests verify whole-turn eviction, system-message retention, and rejection of a persisted window that starts mid-turn. Tests do not call Gemini or Ollama or evaluate live model tool selection/response quality. Database tests require a development database with the original seed data. Persistence test transactions roll back; endpoint tests commit their chat records, and identity sequences still advance. Prefer a disposable database for the suite.
 
 ## API
 
-Both endpoints consume `application/json` and accept `{"conversationId":"...","query":"..."}`. `/api/chat` produces JSON; `/api/chat/stream` produces `text/event-stream`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query to Gemini and may incur API usage costs.
+Both endpoints consume `application/json` and accept `{"conversationId":"...","query":"...","provider":"ollama"}`. `provider` is optional and accepts `gemini` or `ollama`, case-insensitively. `/api/chat` produces JSON; `/api/chat/stream` produces `text/event-stream`. The ID must be a UUID; reuse it for follow-up questions and use a new UUID for a new chat. Examples below use the default local port. Responses are illustrative; calling the endpoint sends the query and context to the saved provider and Gemini may incur API usage costs.
+
+`ConversationHistoryService.findOrCreateConversation(id, requestedProvider)` sets the provider on creation, using `app.ai.default-provider` (`AI_DEFAULT_PROVIDER`, default `GEMINI`) when omitted. Follow-ups use the saved choice. Requesting a different provider returns HTTP 409 before invoking an AI service or opening SSE; unknown or blank provider values return HTTP 400. Use a new UUID to change providers. V4 backfills existing conversations with `GEMINI`. `AiProviderSelector` uses CDI-injected provider adapters. The provider is committed before LLM generation; a failed generation can leave an empty conversation with its provider pinned. History and memory continue to use the existing one-argument `findOrCreateConversation` overload. Concurrent creation and concurrent turns for the same UUID are not handled; send requests sequentially.
+
+Endpoint tests replace only `GeminiAiService` and `OllamaAiService`, exercising the production selector and adapters. They verify both providers, default selection, cross-mode follow-ups, 400/409 rejection without model calls, and the existing history/SSE behavior. The migration test runs V3/V4 in a separate transaction-scoped schema and verifies that legacy conversations become Gemini conversations.
 
 ### `POST /api/chat`
 
@@ -324,7 +340,7 @@ curl -N http://localhost:8080/api/chat/stream \
   --data '{"conversationId":"0dc136ef-58ba-48de-a41a-c6f8a490fb1c","query":"How much did they spend?"}'
 ```
 
-`BusinessAnalysisService.chatStream` returns `Multi<ChatEvent>` using the event API supported by the installed Quarkus LangChain4j extension. The REST endpoint returns `Multi<ChatStreamEventDTO>` with JSON SSE `data:` elements. Gemini's actual partial responses become `CHUNK` events without splitting or waiting for the complete answer. `BeforeToolExecutionEvent` becomes `TOOL_STARTED`, and `ToolExecutedEvent` becomes `TOOL_COMPLETED`; both expose only the actual tool name. Thinking, arguments, raw results, and intermediate responses are filtered out.
+`BusinessAnalysisService.chatStream` returns `Multi<ChatEvent>` using the event API supported by the installed Quarkus LangChain4j extension. The REST endpoint returns `Multi<ChatStreamEventDTO>` with JSON SSE `data:` elements. The selected provider's actual partial responses become `CHUNK` events without splitting or waiting for the complete answer. `BeforeToolExecutionEvent` becomes `TOOL_STARTED`, and `ToolExecutedEvent` becomes `TOOL_COMPLETED`; both expose only the actual tool name. Thinking, arguments, raw results, and intermediate responses are filtered out.
 
 ```text
 data: {"type":"TOOL_STARTED","content":"getLowStockProducts"}
@@ -336,13 +352,13 @@ data: {"type":"CHUNK","content":"Three products are low stock."}
 data: {"type":"DONE","content":null}
 ```
 
-This method shares the resource-based system prompt, registered tools, `@MemoryId`, turn-aware memory provider, and PostgreSQL memory store with `chat`. The shared prompt selects JSON when the existing method requires its DTO schema, and plain text otherwise. Both Gemini model types use the existing API key, model ID, temperature, and other chat-model settings. `/api/chat` still returns `BusinessAnalysisDTO`; the SSE protocol does not stream that DTO.
+This method shares the resource-based system prompt, registered tools, `@MemoryId`, turn-aware memory provider, and PostgreSQL memory store with `chat`. The shared prompt selects JSON when the existing method requires its DTO schema, and plain text otherwise. Each provider's chat and streaming models use its named model configuration. `/api/chat` still returns `BusinessAnalysisDTO`; the SSE protocol does not stream that DTO.
 
 Quarkus REST keeps the connection open until generation finishes. `ChatService` accumulates only `CHUNK` content to save one successful USER/ASSISTANT exchange in `chat_messages`; status events never enter assistant text, and accumulation does not delay delivery. After successful completion, history is persisted before exactly one final `DONE` event. Completion/history persistence runs on Quarkus's existing worker pool because the application uses blocking JDBC, without a transaction spanning LLM generation.
 
 Stream or history-persistence failures are logged in detail and produce one final `{"type":"ERROR","content":"Unable to complete the streaming request."}` event with no `DONE` afterward. Partial failed responses are not saved as successful exchanges. Invalid/missing conversation UUIDs still return HTTP 400 before streaming starts.
 
-The installed Quarkus `3.39.3`, Quarkus LangChain4j `1.13.1`, and LangChain4j `1.19.0` already support actual tool lifecycle events; no dependency changes are required. Chunk sizes and timing are provider-controlled, and chunks are not guaranteed to correspond to individual tokens. This version commits streaming input to active memory before generation, so a failed/cancelled turn can leave input in that window; only successful exchanges enter full history. Finish one request before sending another with the same conversation ID, including requests that mix the two endpoints.
+The installed Quarkus `3.39.3`, Quarkus LangChain4j `1.13.1`, and LangChain4j `1.19.0` support actual tool lifecycle events. The Ollama extension uses the same BOM-managed versions. Chunk sizes and timing are provider-controlled, and chunks are not guaranteed to correspond to individual tokens. This version commits streaming input to active memory before generation, so a failed/cancelled turn can leave input in that window; only successful exchanges enter full history. Finish one request before sending another with the same conversation ID, including requests that mix the two endpoints.
 
 ## Current Limitations
 

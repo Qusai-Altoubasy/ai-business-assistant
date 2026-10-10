@@ -28,7 +28,7 @@ public class ChatResource {
     @POST
     public BusinessAnalysisDTO chat(ChatRequestDTO request) {
         UUID conversationId = validateAndParseConversationId(request);
-        return chatService.chat(conversationId, request.query());
+        return chatService.chat(conversationId, request.query(), request.provider());
     }
 
     @POST
@@ -38,7 +38,7 @@ public class ChatResource {
     @Blocking // Memory and history persistence use blocking JDBC.
     public Multi<ChatStreamEventDTO> chatStream(ChatRequestDTO request) {
         UUID conversationId = validateAndParseConversationId(request);
-        return chatService.chatStream(conversationId, request.query());
+        return chatService.chatStream(conversationId, request.query(), request.provider());
     }
 
     private static UUID validateAndParseConversationId(ChatRequestDTO request) {

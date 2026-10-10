@@ -43,8 +43,8 @@ class BusinessPersistenceTest {
     Flyway flyway;
 
     @Test
-    void bothMigrationsAreRegistered() {
-        assertEquals(List.of("1", "2", "3"), Arrays.stream(flyway.info().applied())
+    void allMigrationsAreRegistered() {
+        assertEquals(List.of("1", "2", "3", "4"), Arrays.stream(flyway.info().applied())
                 .map(migration -> migration.getVersion().toString()).toList());
         assertEquals(0, flyway.info().pending().length);
     }

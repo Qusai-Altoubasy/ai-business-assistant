@@ -5,7 +5,7 @@ AI Business Assistant with a Quarkus backend, PostgreSQL business data, and a Fl
 ## Tech Stack
 
 - Java 21 and Quarkus 3.39.3
-- LangChain4j AI Services with Google Gemini Developer API
+- LangChain4j AI Services with Google Gemini Developer API and the company's Ollama server
 - Maven Wrapper
 - PostgreSQL 18, Hibernate ORM with Panache, and Flyway
 - Flutter with Riverpod, Dio for structured requests, and `http` for Web streaming
@@ -13,7 +13,9 @@ AI Business Assistant with a Quarkus backend, PostgreSQL business data, and a Fl
 
 ## Current Features
 
-The backend exposes structured JSON at `POST /api/chat` and JSON SSE events at `POST /api/chat/stream`. Both use the same AI service, resource-based business prompt, conversation memory, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
+The backend exposes structured JSON at `POST /api/chat` and JSON SSE events at `POST /api/chat/stream`. Both use the conversation's saved Gemini or Ollama provider, the same business-analysis contract, resource-based business prompt, conversation memory, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
+
+Both endpoints accept an optional `provider` (`gemini` or `ollama`). The first request saves that choice on the conversation; omitting it uses `AI_DEFAULT_PROVIDER` (default `GEMINI`). Follow-ups use the saved provider, even after the application default changes. Requesting a different provider for the same UUID returns HTTP 409 before generation or SSE starts; start a new conversation to switch. Unknown or blank providers return HTTP 400. The Flutter client currently omits this optional field, so new chats use the backend default; API clients can select either provider explicitly. V4 assigns `GEMINI` to conversations created before this feature. Concurrent requests with the same UUID are outside the supported flow; send messages sequentially.
 
 The Flutter client offers Structured Chat and Streaming Chat in the sidebar. Structured Chat renders the `BusinessAnalysisDTO` summary, insights, and recommendations. Streaming Chat updates one assistant message as `CHUNK` events arrive and shows temporary tool progress; `DONE` finishes the response, while `ERROR` shows a safe retryable error and preserves partial text. Both modes share one screen, editable suggested prompts, and a stable UUID `conversationId`. Messages displayed in the current tab live in Riverpod state; the backend persists successful user/assistant exchanges and retains the latest 10 whole user turns as active AI context. Mode switches preserve the conversation ID; New Chat creates a new ID, clears the UI, and keeps the selected mode. The sidebar lists chat modes and example-question labels rather than stored conversations.
 
@@ -47,10 +49,14 @@ Flutter / HTTP client
   ↓
 Quarkus REST API (ChatResource)
   ↓
-ChatService → LangChain4j AI Service (BusinessAnalysisService with @MemoryId)
+ChatService → ConversationHistoryService.findOrCreateConversation → saved provider
+  ↓
+AiProviderSelector → GeminiBusinessAnalysisService / OllamaBusinessAnalysisService
+  ↓
+GeminiAiService / OllamaAiService (named LangChain4j models with @MemoryId)
   ↔ TurnAwareChatMemory → PostgresChatMemoryStore → chat_memory_state
   ↓
-Google Gemini ↔ InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
+Gemini / Ollama ↔ InventoryTools / SalesTools / CustomerTools → repositories → PostgreSQL
               ↔ CommonTools → current application date
   ↓
 BusinessAnalysisDTO or accumulated response text → ConversationHistoryService → chat_messages
@@ -59,7 +65,7 @@ BusinessAnalysisDTO or mapped ChatEvent values → JSON sections or SSE → Flut
 
 The backend follows a **feature-based architecture**: the REST resource, `BusinessAnalysisService`, request/analysis DTOs, conversation history, and chat memory belong to `chat`. Inventory, sales, and customer tools live with their business features; the shared current-date tool lives in `common.tools`. System instructions live under `src/main/resources/prompts` and are packaged with the backend.
 
-There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. Gemini decides which registered read-only tools to use. Flutter receives the final analysis DTO in Structured Chat; Streaming Chat receives text chunks and tool names as SSE events, not tool arguments, results, or model thinking.
+There are no global `controller`, `service`, `dto`, or `repository` packages. The sibling `product`, `customer`, and `order` packages contain four JPA entities and their Panache repositories. The selected model decides which registered read-only tools to use. Flutter receives the final analysis DTO in Structured Chat; Streaming Chat receives text chunks and tool names as SSE events, not tool arguments, results, or model thinking.
 
 ## Project Structure
 
@@ -75,7 +81,10 @@ Backend/
 │   ├── ChatResource.java
 │   ├── ChatService.java
 │   ├── ai/
-│   │   └── BusinessAnalysisService.java
+│   │   ├── BusinessAnalysisService.java       # Shared contract
+│   │   ├── AiProvider.java / AiProviderSelector.java
+│   │   ├── GeminiAiService.java / OllamaAiService.java
+│   │   └── GeminiBusinessAnalysisService.java / OllamaBusinessAnalysisService.java
 │   ├── dto/                         # Request, structured response, and stream events
 │   ├── history/                     # Conversations and full message history
 │   └── memory/                      # Turn-aware window and PostgreSQL store
@@ -86,7 +95,7 @@ Backend/
 ├── src/main/resources/
 │   ├── application.properties
 │   ├── prompts/business-analysis-system.txt
-│   └── db/migration/              # Flyway V1/V2 business data and V3 chat history
+│   └── db/migration/              # V1/V2 business data, V3 chat history, V4 saved AI provider
 ├── src/test/java/com/aibusinessassistant/chat/ChatResourceTest.java
 ├── src/test/java/com/aibusinessassistant/chat/memory/  # Memory tests
 ├── src/test/java/com/aibusinessassistant/order/BusinessPersistenceTest.java
@@ -108,17 +117,24 @@ cp deploy/.env.example deploy/.env
 
 Edit `deploy/.env`: supply `GEMINI_API_KEY`, select `GEMINI_MODEL`, set a nonempty `POSTGRES_PASSWORD`, and configure the ports and other PostgreSQL settings. Keep all settings from the template in this file. If it already exists, update it instead of overwriting it. Git ignores `deploy/.env` and tracks the template.
 
-The backend injects Gemini settings from environment variables:
+The backend injects named-model settings from environment variables:
 
 ```properties
-quarkus.langchain4j.ai.gemini.api-key=${GEMINI_API_KEY}
-quarkus.langchain4j.ai.gemini.chat-model.model-id=${GEMINI_MODEL}
+app.ai.default-provider=${AI_DEFAULT_PROVIDER:GEMINI}
+quarkus.langchain4j.ai.gemini.business-gemini.api-key=${GEMINI_API_KEY}
+quarkus.langchain4j.ai.gemini.business-gemini.chat-model.model-id=${GEMINI_MODEL}
+quarkus.langchain4j.ollama.business-ollama.base-url=${OLLAMA_BASE_URL:https://ai.llm.ensera.dev}
+quarkus.langchain4j.ollama.business-ollama.chat-model.model-id=${OLLAMA_MODEL:qwen3-vl:8b-instruct-q8_0}
 ```
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Gemini Developer API key; required for AI requests | None |
 | `GEMINI_MODEL` | Gemini chat model ID; required | None |
+| `AI_DEFAULT_PROVIDER` | Provider for new conversations without an explicit selection | `GEMINI` |
+| `OLLAMA_BASE_URL` | Ollama server origin, without `/api/chat` | `https://ai.llm.ensera.dev` |
+| `OLLAMA_MODEL` | Model deployed on the Ollama server | `qwen3-vl:8b-instruct-q8_0` |
+| `OLLAMA_TIMEOUT` | Timeout for Ollama requests | `120s` |
 | `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS | `http://127.0.0.1:3000` |
 | `API_BASE_URL` | Browser URL compiled into Flutter; Compose sends `/api/` through Nginx | `http://127.0.0.1:3000` in `deploy/.env.example` |
 | `DB_USERNAME` | JDBC username for a locally run backend | `ai_business_assistant` |
@@ -127,7 +143,7 @@ quarkus.langchain4j.ai.gemini.chat-model.model-id=${GEMINI_MODEL}
 
 Compose reads `deploy/.env` and configures the backend's `DB_*` values from `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`, using `ai-business-assistant-postgres:5432` as the database address inside Docker. `POSTGRES_PORT` controls the host port (default `5432`). See [deploy/.env.example](deploy/.env.example). For Maven, load the same file into the shell as shown below; Quarkus reads the exported variables.
 
-The Gemini chat-model temperature is set directly to `0.1` in `Backend/src/main/resources/application.properties`; there is no project-defined `TEMPERATURE` environment variable. The test profile supplies non-secret Gemini placeholders.
+Both named chat models use temperature `0.1` in `Backend/src/main/resources/application.properties`; there is no project-defined `TEMPERATURE` environment variable. The test profile supplies non-secret placeholders for both providers; endpoint tests replace the model-facing AI services.
 
 ## Running Locally
 
@@ -195,11 +211,11 @@ docker compose down
 
 PostgreSQL stores data in the named volume `ai-business-assistant-postgres-data`. Container recreation and `docker compose down` preserve it; `docker compose down -v` deletes it. `POSTGRES_DB` creates the database only on the first initialization of an empty volume. Changing `POSTGRES_*` later does not reconfigure an existing database.
 
-On backend startup, Flyway applies `V1__create_business_schema.sql`, `V2__seed_business_data.sql`, and `V3__add_persistent_chat_history.sql` inside that database. V3 creates `conversations`, append-only `chat_messages`, and `chat_memory_state` for the active AI context. Hibernate then validates the schema; it never creates or updates tables. V2 seeds 10 products, 5 customers, 12 orders, and 24 order items across January–March 2026, including low-stock products. Order-item prices are historical unit prices; each order total matches its line items. Migrations run once and are tracked in `flyway_schema_history`; evolve the schema with new migrations instead of editing applied ones.
+On backend startup, Flyway applies `V1__create_business_schema.sql`, `V2__seed_business_data.sql`, `V3__add_persistent_chat_history.sql`, and `V4__add_conversation_ai_provider.sql` inside that database. V3 creates `conversations`, append-only `chat_messages`, and `chat_memory_state` for the active AI context. V4 adds the saved provider and backfills existing conversations with `GEMINI`. Hibernate then validates the schema; it never creates or updates tables. V2 seeds 10 products, 5 customers, 12 orders, and 24 order items across January–March 2026, including low-stock products. Order-item prices are historical unit prices; each order total matches its line items. Migrations run once and are tracked in `flyway_schema_history`; evolve the schema with new migrations instead of editing applied ones.
 
 ## API
 
-Both chat endpoints consume `application/json` with `ChatRequestDTO`: a required UUID `conversationId` and a `query` string. Reuse the ID for follow-up questions and use a new UUID for a new chat.
+Both chat endpoints consume `application/json` with `ChatRequestDTO`: a required UUID `conversationId`, a `query` string, and an optional `provider` (`gemini` or `ollama`). Reuse the ID and its saved provider for follow-up questions; use a new UUID to change providers or start a new chat.
 
 ### `POST /api/chat`
 
@@ -225,7 +241,7 @@ Illustrative response:
 }
 ```
 
-Generated responses vary. Calling the endpoint sends the query to Gemini and may incur API usage costs. Flutter preserves the structured fields and hides empty insight/recommendation sections.
+Generated responses vary. Calling the endpoint sends the query to the saved provider; Gemini may incur API usage costs. Flutter preserves the structured fields and hides empty insight/recommendation sections.
 
 Other supported queries include `"How much did we sell from January 1 to March 31, 2026?"`, `"What is the current stock for product ID 1?"`, and `"What are the purchase statistics for customer ID 1?"`. With the original seed data, customer 1 (Maya Reed) has three orders totaling `483.00`, with an average order value of `161.00`. These values are internal tool data; the HTTP response remains the same three analysis fields.
 
@@ -251,7 +267,7 @@ cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint tests substitute `BusinessAnalysisService` and verify structured fields, stream event order and tool filtering, UUID validation, history persistence, and safe error events. Persistence tests verify Flyway migrations, seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call Gemini. Test inserts roll back, though PostgreSQL identity sequences still advance. Use a development database with the original seed data; tests use the configured `DB_*` connection. Model tool selection and AI response quality are not tested yet.
+The endpoint tests substitute the model-facing `GeminiAiService` and `OllamaAiService`, exercising the real selector and adapters. They verify saved/default provider selection, cross-mode follow-ups, 400/409 rejection without model calls, structured fields, stream event order and tool filtering, UUID validation, history persistence, and safe error events. The migration test verifies legacy Gemini backfill. Persistence tests verify seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call either model. Persistence test transactions roll back, but endpoint tests commit chat records and PostgreSQL identity sequences still advance. Prefer a disposable development database with the original seed data; tests use the configured `DB_*` connection. Live model tool selection and AI response quality are not covered by this suite.
 
 For the frontend, from the repository root:
 

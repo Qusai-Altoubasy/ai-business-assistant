@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.ArrayList;
@@ -13,11 +14,15 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import com.aibusinessassistant.chat.ai.BusinessAnalysisService;
+import com.aibusinessassistant.chat.ai.AiProvider;
+import com.aibusinessassistant.chat.ai.GeminiAiService;
+import com.aibusinessassistant.chat.ai.OllamaAiService;
 import com.aibusinessassistant.chat.dto.BusinessAnalysisDTO;
 import com.aibusinessassistant.chat.dto.ChatRequestDTO;
 import com.aibusinessassistant.chat.dto.ChatStreamEventDTO;
 import com.aibusinessassistant.chat.dto.StreamEventType;
 import com.aibusinessassistant.chat.history.ConversationMessageRepository;
+import com.aibusinessassistant.chat.history.ConversationRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -47,10 +52,113 @@ class ChatResourceTest {
     ConversationMessageRepository messages;
 
     @Inject
+    ConversationRepository conversations;
+
+    @Inject
     ObjectMapper objectMapper;
 
     @Inject
     ChatService chatService;
+
+    @Test
+    void omittedProviderUsesTheConfiguredDefault() {
+        UUID id = UUID.randomUUID();
+        given().contentType(ContentType.JSON)
+                .body("{\"conversationId\":\"" + id + "\",\"query\":\"test\"}")
+                .when().post("/api/chat").then().statusCode(200);
+
+        assertEquals(AiProvider.GEMINI, TestBusinessAnalysisService.lastProvider);
+        assertEquals(AiProvider.GEMINI, conversations.findById(id).getProvider());
+    }
+
+    @Test
+    void bothProvidersWorkAcrossStructuredAndStreamingFollowUps() throws JsonProcessingException {
+        for (AiProvider provider : AiProvider.values()) {
+            UUID id = UUID.randomUUID();
+            given().contentType(ContentType.JSON)
+                    .body(new ChatRequestDTO(id.toString(), QUERY, provider))
+                    .when().post("/api/chat").then().statusCode(200);
+            assertEquals(provider, TestBusinessAnalysisService.lastProvider);
+            assertEquals(provider, conversations.findById(id).getProvider());
+
+            // An omitted provider uses the stored selection, even when it differs from the default.
+            streamEvents(id, "follow-up");
+            assertEquals(provider, TestBusinessAnalysisService.lastProvider);
+            assertEquals(provider, conversations.findById(id).getProvider());
+
+            given().contentType(ContentType.JSON).accept("text/event-stream")
+                    .body(new ChatRequestDTO(id.toString(), QUERY, provider))
+                    .when().post("/api/chat/stream").then().statusCode(200)
+                    .contentType("text/event-stream");
+            assertEquals(provider, TestBusinessAnalysisService.lastProvider);
+            assertEquals(6, messages.listByConversationId(id).size());
+        }
+    }
+
+    @Test
+    void streamingFirstRequestPinsTheProviderForStructuredFollowUps() {
+        for (AiProvider provider : AiProvider.values()) {
+            UUID id = UUID.randomUUID();
+            given().contentType(ContentType.JSON).accept("text/event-stream")
+                    .body(new ChatRequestDTO(id.toString(), QUERY, provider))
+                    .when().post("/api/chat/stream").then().statusCode(200);
+            assertEquals(provider, TestBusinessAnalysisService.lastProvider);
+
+            given().contentType(ContentType.JSON)
+                    .body(new ChatRequestDTO(id.toString(), "follow-up"))
+                    .when().post("/api/chat").then().statusCode(200);
+            assertEquals(provider, TestBusinessAnalysisService.lastProvider);
+            assertEquals(provider, conversations.findById(id).getProvider());
+        }
+    }
+
+    @Test
+    void changingProviderIsRejectedBeforeEitherModelOrSseIsInvoked() {
+        for (AiProvider provider : AiProvider.values()) {
+            UUID id = UUID.randomUUID();
+            given().contentType(ContentType.JSON)
+                    .body(new ChatRequestDTO(id.toString(), QUERY, provider))
+                    .when().post("/api/chat").then().statusCode(200);
+            AiProvider other = provider == AiProvider.GEMINI ? AiProvider.OLLAMA : AiProvider.GEMINI;
+            int callsBefore = TestBusinessAnalysisService.invocations;
+
+            for (String endpoint : List.of("/api/chat", "/api/chat/stream")) {
+                given().contentType(ContentType.JSON)
+                        .accept(endpoint.endsWith("/stream") ? "text/event-stream" : "application/json")
+                        .body(new ChatRequestDTO(id.toString(), "switch", other))
+                        .when().post(endpoint).then().statusCode(409);
+            }
+
+            assertEquals(callsBefore, TestBusinessAnalysisService.invocations);
+            assertEquals(provider, conversations.findById(id).getProvider());
+            assertEquals(2, messages.listByConversationId(id).size());
+        }
+    }
+
+    @Test
+    void invalidProvidersAreRejectedBeforeCreatingConversationOrCallingModel() {
+        for (String endpoint : List.of("/api/chat", "/api/chat/stream")) {
+            for (String value : List.of("\"unknown\"", "\"\"", "42")) {
+                UUID id = UUID.randomUUID();
+                int callsBefore = TestBusinessAnalysisService.invocations;
+                given().contentType(ContentType.JSON)
+                        .body("{\"conversationId\":\"" + id + "\",\"query\":\"test\",\"provider\":" + value + "}")
+                        .when().post(endpoint).then().statusCode(400);
+                assertEquals(callsBefore, TestBusinessAnalysisService.invocations);
+                assertNull(conversations.findById(id));
+            }
+        }
+    }
+
+    @Test
+    void providerNamesAcceptCaseAndSurroundingWhitespace() {
+        UUID id = UUID.randomUUID();
+        given().contentType(ContentType.JSON)
+                .body("{\"conversationId\":\"" + id + "\",\"query\":\"test\",\"provider\":\" GeMiNi \"}")
+                .when().post("/api/chat").then().statusCode(200);
+        assertEquals(AiProvider.GEMINI, TestBusinessAnalysisService.lastProvider);
+        assertEquals(AiProvider.GEMINI, conversations.findById(id).getProvider());
+    }
 
     @Test
     void normalChatServiceRethrowsAiFailureWithoutRecordingSuccessfulHistory() {
@@ -62,6 +170,7 @@ class ChatResourceTest {
         assertEquals(conversationId, TestBusinessAnalysisService.lastConversationId);
         assertEquals("provider-failure", TestBusinessAnalysisService.lastQuery);
         assertEquals(0, messages.listByConversationId(conversationId).size());
+        assertEquals(AiProvider.GEMINI, conversations.findById(conversationId).getProvider());
     }
 
     @Test
@@ -202,16 +311,23 @@ class ChatResourceTest {
     }
 }
 
-@Alternative
-@Priority(1)
-@ApplicationScoped
 class TestBusinessAnalysisService implements BusinessAnalysisService {
 
     static volatile String lastQuery;
     static volatile UUID lastConversationId;
+    static volatile AiProvider lastProvider;
+    static volatile int invocations;
+
+    private final AiProvider provider;
+
+    TestBusinessAnalysisService(AiProvider provider) {
+        this.provider = provider;
+    }
 
     @Override
     public Multi<ChatEvent> chatStream(UUID conversationId, String query) {
+        lastProvider = provider;
+        invocations++;
         lastConversationId = conversationId;
         lastQuery = query;
         if ("provider-failure".equals(query)) {
@@ -247,6 +363,8 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
 
     @Override
     public BusinessAnalysisDTO chat(UUID conversationId, String query) {
+        lastProvider = provider;
+        invocations++;
         lastConversationId = conversationId;
         lastQuery = query;
         if ("provider-failure".equals(query)) {
@@ -257,5 +375,39 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
                 ChatResourceTest.INSIGHTS,
                 ChatResourceTest.RECOMMENDATIONS
         );
+    }
+}
+
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class TestGeminiAiService implements GeminiAiService {
+    private final TestBusinessAnalysisService delegate = new TestBusinessAnalysisService(AiProvider.GEMINI);
+
+    @Override
+    public BusinessAnalysisDTO chat(UUID conversationId, String query) {
+        return delegate.chat(conversationId, query);
+    }
+
+    @Override
+    public Multi<ChatEvent> chatStream(UUID conversationId, String query) {
+        return delegate.chatStream(conversationId, query);
+    }
+}
+
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class TestOllamaAiService implements OllamaAiService {
+    private final TestBusinessAnalysisService delegate = new TestBusinessAnalysisService(AiProvider.OLLAMA);
+
+    @Override
+    public BusinessAnalysisDTO chat(UUID conversationId, String query) {
+        return delegate.chat(conversationId, query);
+    }
+
+    @Override
+    public Multi<ChatEvent> chatStream(UUID conversationId, String query) {
+        return delegate.chatStream(conversationId, query);
     }
 }

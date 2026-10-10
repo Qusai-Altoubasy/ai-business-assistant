@@ -2,6 +2,8 @@ package com.aibusinessassistant.chat;
 
 import java.util.UUID;
 
+import com.aibusinessassistant.chat.ai.AiProvider;
+import com.aibusinessassistant.chat.ai.AiProviderSelector;
 import com.aibusinessassistant.chat.ai.BusinessAnalysisService;
 import com.aibusinessassistant.chat.dto.BusinessAnalysisDTO;
 import com.aibusinessassistant.chat.dto.ChatStreamEventDTO;
@@ -21,29 +23,46 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ChatService {
 
-    private final BusinessAnalysisService businessAnalysisService;
+    private final AiProviderSelector providerSelector;
     private final ConversationHistoryService conversationHistoryService;
     private final ChatMemoryStore chatMemoryStore;
 
     public BusinessAnalysisDTO chat(UUID conversationId, String query) {
-        log.info("AI request received: business-analysis (conversationId={}, queryLength={}, memoryMessagesBefore={})",
-                conversationId, queryLength(query), chatMemoryStore.getMessages(conversationId).size());
+        return chat(conversationId, query, null);
+    }
+
+    public BusinessAnalysisDTO chat(UUID conversationId, String query, AiProvider requestedProvider) {
+        AiProvider provider = conversationHistoryService.findOrCreateConversation(conversationId, requestedProvider)
+                .getProvider();
+        BusinessAnalysisService businessAnalysisService = providerSelector.select(provider);
+        log.info("AI request received: business-analysis (conversationId={}, provider={}, queryLength={}, memoryMessagesBefore={})",
+                conversationId, provider, queryLength(query), chatMemoryStore.getMessages(conversationId).size());
         long startedAtNanos = System.nanoTime();
 
         try {
             BusinessAnalysisDTO response = businessAnalysisService.chat(conversationId, query);
             conversationHistoryService.recordSuccessfulExchange(conversationId, query, response);
-            log.info("AI request completed: business-analysis (conversationId={}, durationMs={}, memoryMessagesAfter={})",
-                    conversationId, elapsedMilliseconds(startedAtNanos), chatMemoryStore.getMessages(conversationId).size());
+            log.info("AI request completed: business-analysis (conversationId={}, provider={}, durationMs={}, memoryMessagesAfter={})",
+                    conversationId, provider, elapsedMilliseconds(startedAtNanos),
+                    chatMemoryStore.getMessages(conversationId).size());
             return response;
         } catch (RuntimeException exception) {
-            log.error("AI request failed: business-analysis (durationMs={})", elapsedMilliseconds(startedAtNanos), exception);
+            log.error("AI request failed: business-analysis (provider={}, durationMs={})",
+                    provider, elapsedMilliseconds(startedAtNanos), exception);
             throw exception;
         }
     }
 
     public Multi<ChatStreamEventDTO> chatStream(UUID conversationId, String query) {
-        log.info("AI streaming request received: business-analysis (conversationId={})", conversationId);
+        return chatStream(conversationId, query, null);
+    }
+
+    public Multi<ChatStreamEventDTO> chatStream(UUID conversationId, String query, AiProvider requestedProvider) {
+        // Validate and commit the provider before opening SSE or invoking the model.
+        AiProvider provider = conversationHistoryService.findOrCreateConversation(conversationId, requestedProvider)
+                .getProvider();
+        BusinessAnalysisService businessAnalysisService = providerSelector.select(provider);
+        log.info("AI streaming request received: business-analysis (conversationId={}, provider={})", conversationId, provider);
         long startedAtNanos = System.nanoTime();
 
         // Accumulate only for persistent history; each chunk is sent immediately to the client.
@@ -56,9 +75,9 @@ public class ChatService {
                     .invoke(event -> appendPartialResponse(event, accumulatedResponse))
                     .map(ChatService::toStreamEvent)
                     .onCompletion().invoke(() -> completeStreamingRequest(
-                            conversationId, query, accumulatedResponse, startedAtNanos))
+                            conversationId, provider, query, accumulatedResponse, startedAtNanos))
                     .onCompletion().continueWith(doneEvent());
-        }).onFailure().invoke(exception -> logStreamingFailure(conversationId, startedAtNanos, exception))
+        }).onFailure().invoke(exception -> logStreamingFailure(conversationId, provider, startedAtNanos, exception))
                 .onFailure().recoverWithItem(errorEvent());
     }
 
@@ -87,17 +106,18 @@ public class ChatService {
     }
 
     private void completeStreamingRequest(
-            UUID conversationId, String query, StringBuilder accumulatedResponse, long startedAtNanos) {
+            UUID conversationId, AiProvider provider, String query, StringBuilder accumulatedResponse, long startedAtNanos) {
         conversationHistoryService.recordSuccessfulTextExchange(
                 conversationId, query, accumulatedResponse.toString());
-        log.info("AI streaming request completed: business-analysis (conversationId={}, durationMs={})",
-                conversationId, elapsedMilliseconds(startedAtNanos));
+        log.info("AI streaming request completed: business-analysis (conversationId={}, provider={}, durationMs={})",
+                conversationId, provider, elapsedMilliseconds(startedAtNanos));
     }
 
-    private static void logStreamingFailure(UUID conversationId, long startedAtNanos, Throwable exception) {
+    private static void logStreamingFailure(
+            UUID conversationId, AiProvider provider, long startedAtNanos, Throwable exception) {
         log.error(
-                "AI streaming request failed: business-analysis (conversationId={}, durationMs={})",
-                conversationId, elapsedMilliseconds(startedAtNanos), exception);
+                "AI streaming request failed: business-analysis (conversationId={}, provider={}, durationMs={})",
+                conversationId, provider, elapsedMilliseconds(startedAtNanos), exception);
     }
 
     private static ChatStreamEventDTO doneEvent() {
