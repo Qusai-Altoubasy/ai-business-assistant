@@ -1,5 +1,7 @@
 # AI Business Assistant
 
+[![Backend CI](https://github.com/Qusai-Altoubasy/ai-business-assistant/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/Qusai-Altoubasy/ai-business-assistant/actions/workflows/backend-ci.yml)
+
 AI Business Assistant with a Quarkus backend, PostgreSQL business data, and a Flutter client that supports structured and streaming chat.
 
 ## Tech Stack
