@@ -13,6 +13,7 @@ import com.aibusinessassistant.chat.history.ConversationHistoryService;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import io.quarkiverse.langchain4j.runtime.aiservice.ChatEvent;
 import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.RequiredArgsConstructor;
@@ -69,13 +70,15 @@ public class ChatService {
         return Multi.createFrom().deferred(() -> {
             StringBuilder accumulatedResponse = new StringBuilder();
             return businessAnalysisService.chatStream(conversationId, query)
-                    // Completion can arrive on the event loop; history writes need a worker.
-                    .emitOn(Infrastructure.getDefaultWorkerPool())
                     .filter(ChatService::isClientVisibleEvent)
                     .invoke(event -> appendPartialResponse(event, accumulatedResponse))
                     .map(ChatService::toStreamEvent)
-                    .onCompletion().invoke(() -> completeStreamingRequest(
-                            conversationId, provider, query, accumulatedResponse, startedAtNanos))
+                    // Completion can arrive on the event loop; only the history write moves to a worker.
+                    // Items and failures stay unbuffered so a chunk is never dropped by a later failure.
+                    .onCompletion().call(() -> Uni.createFrom().item(() -> {
+                        completeStreamingRequest(conversationId, provider, query, accumulatedResponse, startedAtNanos);
+                        return null;
+                    }).runSubscriptionOn(Infrastructure.getDefaultWorkerPool()))
                     .onCompletion().continueWith(doneEvent());
         }).onFailure().invoke(exception -> logStreamingFailure(conversationId, provider, startedAtNanos, exception))
                 .onFailure().recoverWithItem(errorEvent());

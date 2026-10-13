@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,8 +35,12 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.tool.ToolExecution;
 import io.quarkiverse.langchain4j.runtime.aiservice.ChatEvent;
 import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.helpers.test.AssertSubscriber;
+import io.smallrye.mutiny.operators.multi.processors.UnicastProcessor;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
+import io.vertx.core.Context;
+import io.vertx.core.Vertx;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Alternative;
@@ -59,6 +65,9 @@ class ChatResourceTest {
 
     @Inject
     ChatService chatService;
+
+    @Inject
+    Vertx vertx;
 
     @Test
     void omittedProviderUsesTheConfiguredDefault() {
@@ -191,6 +200,49 @@ class ChatResourceTest {
     }
 
     @Test
+    void chunkFollowedImmediatelyByFailureIsDeliveredBeforeTheErrorWithoutDone() {
+        UUID conversationId = UUID.randomUUID();
+        UnicastProcessor<ChatEvent> upstream = UnicastProcessor.create();
+        TestBusinessAnalysisService.scriptedStream = upstream;
+        AssertSubscriber<ChatStreamEventDTO> subscriber = chatService.chatStream(conversationId, "scripted")
+                .subscribe().withSubscriber(AssertSubscriber.create(Long.MAX_VALUE));
+
+        // The test thread emits both signals back to back; no scheduler decides their order.
+        upstream.onNext(new ChatEvent.PartialResponseEvent("Partial answer"));
+        upstream.onError(new IllegalStateException("Provider internal credentials/details"));
+
+        // Asserted without waiting: items and failures must not be buffered behind another thread.
+        subscriber.assertCompleted()
+                .assertItems(new ChatStreamEventDTO(StreamEventType.CHUNK, "Partial answer"), safeError());
+        assertEquals(0, messages.listByConversationId(conversationId).size());
+    }
+
+    @Test
+    void completionOnTheEventLoopPersistsHistoryOnAWorkerBeforeDone() throws JsonProcessingException {
+        UUID conversationId = UUID.randomUUID();
+        // Created from the test thread, so this is an event-loop context.
+        Context eventLoop = vertx.getOrCreateContext();
+        AtomicBoolean emittedOnEventLoop = new AtomicBoolean();
+        TestBusinessAnalysisService.scriptedStream = Multi.createFrom().emitter(emitter ->
+                eventLoop.runOnContext(ignored -> {
+                    emittedOnEventLoop.set(Context.isOnEventLoopThread());
+                    emitter.emit(new ChatEvent.PartialResponseEvent("I can help "));
+                    emitter.emit(new ChatEvent.PartialResponseEvent("with your business questions."));
+                    emitter.complete();
+                }));
+
+        // Blocking JDBC on the event loop would fail, turning DONE into ERROR and rolling back history.
+        assertEquals(List.of(new ChatStreamEventDTO(StreamEventType.CHUNK, "I can help "),
+                new ChatStreamEventDTO(StreamEventType.CHUNK, "with your business questions."),
+                new ChatStreamEventDTO(StreamEventType.DONE, null)), streamEvents(conversationId, "scripted"));
+        assertTrue(emittedOnEventLoop.get());
+        var history = messages.listByConversationId(conversationId);
+        assertEquals(2, history.size());
+        assertEquals("scripted", history.getFirst().getContent());
+        assertEquals(AI_RESPONSE, history.getLast().getContent());
+    }
+
+    @Test
     void synchronousAiFailureAlsoBecomesASafeError() throws JsonProcessingException {
         UUID conversationId = UUID.randomUUID();
         assertEquals(List.of(safeError()), streamEvents(conversationId, "synchronous-failure"));
@@ -317,6 +369,8 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
     static volatile UUID lastConversationId;
     static volatile AiProvider lastProvider;
     static volatile int invocations;
+    // Returned for the "scripted" query so a test controls exactly when and where events are emitted.
+    static volatile Multi<ChatEvent> scriptedStream;
 
     private final AiProvider provider;
 
@@ -335,6 +389,9 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
         }
         if ("synchronous-failure".equals(query)) {
             throw new IllegalStateException("Provider internal credentials/details");
+        }
+        if ("scripted".equals(query)) {
+            return scriptedStream;
         }
         if ("partial-failure".equals(query)) {
             return Multi.createBy().concatenating().streams(
