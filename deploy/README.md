@@ -1,84 +1,51 @@
 # Local Docker deployment
 
-This directory runs the Quarkus backend, Flutter Web frontend, and PostgreSQL 18
-in Docker. All services are published only on `127.0.0.1`.
+[docker-compose.yml](docker-compose.yml) runs the backend, the Flutter Web frontend and PostgreSQL. All ports are published only on `127.0.0.1`.
+
+| Service | Container | Image / build | Port (host → container) |
+| --- | --- | --- | --- |
+| `postgres` | `ai-business-assistant-postgres` | `pgvector/pgvector:0.8.7-pg18-trixie` (PostgreSQL 18 with pgvector) | `${POSTGRES_PORT:-5432}` → `5432` |
+| `backend` | `ai-business-assistant-backend` | Built from `../Backend/Dockerfile` | `${BACKEND_PORT}` → `8080` |
+| `frontend` | `ai-business-assistant-frontend` | Built from `../Frontend/Dockerfile`, with the `API_BASE_URL` build argument | `${FRONTEND_PORT}` → `80` |
+
+The backend starts after the `postgres` healthcheck (`pg_isready`) passes, and the frontend starts after the backend. The backend connects to `ai-business-assistant-postgres:5432`.
+
+PostgreSQL data is stored in the named volume `ai-business-assistant-postgres-data`, mounted at `/var/lib/postgresql`. The volume is kept by `docker compose down` and deleted by `docker compose down -v`. PostgreSQL applies `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` only when the volume is empty.
 
 ## Configuration
 
-From this directory, copy the single committed template once:
+Compose reads `.env` in this directory. From `deploy/`, copy the committed template once:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` to supply your Gemini Developer API key, select the model, and
-configure the ports and PostgreSQL settings. If `.env` already exists, update
-it to include the template's settings instead of overwriting it. This is
-`deploy/.env` relative to the repository root; Git ignores it while tracking
-`deploy/.env.example`. Compose automatically reads this directory's `.env`.
-Exported shell variables take precedence over values in the file.
+Git ignores `.env`. Exported shell variables take precedence over values in the file.
 
-The deployment uses:
+| Variable | Used for | Compose default |
+| --- | --- | --- |
+| `FRONTEND_PORT` | Host port for the frontend | None — required |
+| `BACKEND_PORT` | Host port for the backend | None — required |
+| `API_BASE_URL` | Frontend build argument | None — required |
+| `FRONTEND_ORIGIN` | Backend CORS origin | None — required |
+| `GEMINI_API_KEY` | Gemini Developer API key | None — required |
+| `GEMINI_MODEL` | Gemini chat model ID | None — required |
+| `AI_DEFAULT_PROVIDER` | Provider for new conversations | `GEMINI` |
+| `OLLAMA_BASE_URL` | Ollama server origin | `https://ai.llm.ensera.dev` |
+| `OLLAMA_MODEL` | Ollama model ID | `qwen3-vl:8b-instruct-q8_0` |
+| `OLLAMA_TIMEOUT` | Ollama request timeout | `120s` |
+| `POSTGRES_DB` | Database name; also used in the backend's `DB_URL` | `ai_business_assistant` |
+| `POSTGRES_USER` | Database user; passed to the backend as `DB_USERNAME` | `ai_business_assistant` |
+| `POSTGRES_PASSWORD` | Database password; passed to the backend as `DB_PASSWORD` | `dev_password` |
+| `POSTGRES_PORT` | Host port for PostgreSQL | `5432` |
 
-| Variable | Purpose |
-| --- | --- |
-| `FRONTEND_PORT` | Host port for Flutter Web |
-| `BACKEND_PORT` | Host port for Quarkus |
-| `API_BASE_URL` | Frontend origin compiled into Flutter Web for proxied API requests |
-| `FRONTEND_ORIGIN` | Browser origin allowed by backend CORS |
-| `GEMINI_API_KEY` | Gemini Developer API key; set this only in `.env` |
-| `GEMINI_MODEL` | Gemini chat model ID |
-| `AI_DEFAULT_PROVIDER` | Provider for new chats; defaults to `GEMINI` |
-| `OLLAMA_BASE_URL` | Ollama origin without `/api/chat`; defaults to `https://ai.llm.ensera.dev` |
-| `OLLAMA_MODEL` | Deployed Ollama model; defaults to `qwen3-vl:8b-instruct-q8_0` |
-| `OLLAMA_TIMEOUT` | Ollama request timeout; defaults to `120s` |
-| `POSTGRES_DB` | Database created on first initialization; default `ai_business_assistant` |
-| `POSTGRES_USER` | Database user; default `ai_business_assistant` |
-| `POSTGRES_PASSWORD` | Database password; local development default `dev_password` |
-| `POSTGRES_PORT` | Host PostgreSQL port; default `5432` |
+`.env.example` sets every variable except `GEMINI_API_KEY` and `POSTGRES_PASSWORD`. Set both in `.env`.
 
-Compose supplies the backend's `DB_USERNAME`, `DB_PASSWORD`, and `DB_URL` from
-these PostgreSQL settings. The backend uses `ai-business-assistant-postgres:5432`.
+`API_BASE_URL` is the frontend origin, `http://127.0.0.1:3000` in the template. The browser calls Nginx in the frontend container, which forwards `/api/` requests to `ai-business-assistant-backend:8080`; the browser cannot resolve Docker container names.
 
-`API_BASE_URL` uses the frontend origin, `http://127.0.0.1:3000`. The browser
-calls Nginx, which forwards `/api/` requests to
-`ai-business-assistant-backend:8080`. The browser cannot resolve Docker names.
+## Commands
 
-## Run
-
-Build and start all services (the backend waits for PostgreSQL to be healthy):
-
-```bash
-docker compose up --build
-```
-
-Open the frontend at <http://127.0.0.1:3000>. The backend exposes
-`POST http://127.0.0.1:8080/api/chat` and
-`POST http://127.0.0.1:8080/api/chat/stream`.
-
-Both accept `{"conversationId":"<UUID>","query":"..."}` with an optional
-`"provider":"gemini"` or `"provider":"ollama"`. The provider is saved on the
-first request, defaulting to `AI_DEFAULT_PROVIDER` when omitted. Follow-ups use
-the saved provider; requesting another for the same UUID returns HTTP 409 before
-generation or SSE. Start a new chat to change providers. Unknown or blank values
-return HTTP 400. Flutter explicitly sends the composer’s selected provider on
-every request, starting with Gemini. The menu locks after the first send attempt;
-New Chat unlocks it and retains the current selection. Both providers share the
-business prompt, tools, and PostgreSQL memory. Structured Chat returns `summary`,
-`insights`, and `recommendations` as JSON; Streaming Chat
-returns JSON SSE events that progressively update one assistant message. Nginx
-disables buffering for `/api/` so chunks can reach the browser as they arrive.
-Flutter reuses the UUID for follow-up questions and mode switches, and creates
-a new one for New Chat. Sales summaries,
-low-stock products, product stock, customer purchase statistics, and relative-date
-queries are available through both endpoints. The backend uses read-only tools;
-Streaming Chat shows temporary tool status without exposing tool arguments or
-results.
-
-Customer statistics are requested through the same composer in either mode, for
-example `What are the purchase statistics for customer ID 1?`. They aggregate
-all recorded orders for that customer; no new service, route, or deployment
-variable is required.
+Run these from `deploy/`.
 
 Validate the resolved Compose configuration:
 
@@ -86,74 +53,66 @@ Validate the resolved Compose configuration:
 docker compose config --quiet
 ```
 
-Stop and remove the containers:
+Build and start all services:
 
 ```bash
-docker compose down
+docker compose up -d --build
 ```
 
-The named volume `ai-business-assistant-postgres-data` is mounted at
-`/var/lib/postgresql`, with PostgreSQL 18 data stored in `18/docker` beneath it.
-It survives container recreation and `down`;
-`down -v` deletes the data. PostgreSQL initializes `POSTGRES_DB` and credentials
-only when this volume is empty, so changing `POSTGRES_*` does not update an
-existing database.
-
-Flyway runs V1 (four business tables), V2 (10 products, 5 customers, 12 orders,
-24 order items), V3 (conversation history and active chat memory tables), and V4
-(saved AI provider; existing conversations receive `GEMINI`) on
-backend startup. Hibernate validates the resulting schema.
-Flyway creates tables inside the database, not the database itself.
-
-For a backend running through Maven, start just the database:
+Start only PostgreSQL, for a backend run with Maven (see the [backend guide](../Backend/README.md#run-locally)):
 
 ```bash
 docker compose up -d --wait postgres
 ```
 
-Load this same `deploy/.env` into the shell and map its PostgreSQL settings to
-`DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` using the
-[local backend instructions](../README.md#backend). Quarkus receives these
-exported variables; no separate backend environment file is needed.
+View logs:
+
+```bash
+docker compose logs -f
+```
+
+```bash
+docker compose logs -f backend
+```
+
+Stop and remove the containers, keeping the database volume:
+
+```bash
+docker compose down
+```
+
+Reset the data by also deleting the database volume; the next start recreates the database and Flyway reapplies the migrations:
+
+```bash
+docker compose down -v
+```
+
+With the template's ports, the frontend is at <http://127.0.0.1:3000> and the backend at <http://127.0.0.1:8080>. How the frontend and the backend behave is described in the [frontend README](../Frontend/README.md#current-behavior) and the [backend README](../Backend/README.md).
 
 ## Rebuild After Changes
 
-From `deploy/`, rebuild and recreate the application containers:
+These commands keep the PostgreSQL volume. Rebuild and recreate the application containers:
 
 ```bash
 docker compose up -d --build backend frontend
 ```
 
-An Ollama response containing `upstream request timeout` can originate from the
-remote service or a gateway in front of it. Check those logs and test the
-configured `OLLAMA_BASE_URL` directly with its `/api/chat` endpoint. Increasing
-the application's `OLLAMA_TIMEOUT` does not override a remote gateway's timeout.
-The backend logs the selected provider and request duration to help distinguish
-an Ollama failure from a successful Gemini request.
-
-To bypass Docker build-layer cache and check for newer base images:
+Rebuild without the Docker build-layer cache and pull newer base images:
 
 ```bash
 docker compose build --no-cache --pull backend frontend
 docker compose up -d --force-recreate backend frontend
 ```
 
-The system prompt at `Backend/src/main/resources/prompts/business-analysis-system.txt`
-is packaged with the backend, rather than mounted or loaded from `.env`. After
-changing tools or this prompt, rebuild and recreate the backend image:
+The system prompt at `Backend/src/main/resources/prompts/business-analysis-system.txt` is packaged into the backend image, not mounted or read from `.env`. After changing the prompt or the tools, rebuild and recreate the backend:
 
 ```bash
 docker compose up -d --build --force-recreate backend
 ```
 
-`API_BASE_URL` is compiled into the Flutter bundle. Changing it in `.env`
-requires rebuilding the frontend image. The Web bootstrap cleans up legacy
-Flutter service workers/caches, and Nginx serves HTML and bootstrap files with
-`Cache-Control: no-store`. If a browser tab still runs an old bundle, close it
-and clear site data for `http://127.0.0.1:3000` before reopening it. Docker build
-cache and browser cache are separate.
+`API_BASE_URL` is compiled into the Flutter bundle, so changing it in `.env` requires rebuilding the frontend image.
 
-These commands preserve the PostgreSQL volume. Seeded sales cover January–March
-2026; use an explicit period in that range to query the seeded sales. Questions
-such as "last month" use the backend's current date and may have no matching
-orders.
+## Troubleshooting
+
+- **Ollama `upstream request timeout`:** this can come from the remote Ollama service or a gateway in front of it. Check those logs and test the configured `OLLAMA_BASE_URL` directly with its `/api/chat` endpoint. Raising `OLLAMA_TIMEOUT` does not change a remote gateway's timeout. The backend logs the provider and duration of each request, which helps tell an Ollama failure apart from a Gemini request.
+- **Browser runs an old frontend bundle:** the Web bootstrap removes old Flutter service workers and caches, and Nginx serves `index.html`, `flutter_bootstrap.js` and `flutter_service_worker.js` with `Cache-Control: no-store`. If a tab still runs an old bundle, close it and clear site data for `http://127.0.0.1:3000`. Docker build cache and browser cache are separate.

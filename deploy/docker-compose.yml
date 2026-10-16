@@ -36,7 +36,7 @@ services:
 
   postgres:
     container_name: ai-business-assistant-postgres
-    image: postgres:18
+    image: pgvector/pgvector:0.8.7-pg18-trixie
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ai_business_assistant}
       POSTGRES_USER: ${POSTGRES_USER:-ai_business_assistant}
