@@ -25,21 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    services:
-      postgres:
-        image: pgvector/pgvector:0.8.7-pg18-trixie
-        env:
-          POSTGRES_DB: ai_business_assistant_ci
-          POSTGRES_USER: ci_user
-          POSTGRES_PASSWORD: ci_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ci_user -d ai_business_assistant_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -53,10 +38,6 @@ jobs:
 
       - name: Build and run tests
         working-directory: Backend
-        env:
-          DB_URL: jdbc:postgresql://localhost:5432/ai_business_assistant_ci
-          DB_USERNAME: ci_user
-          DB_PASSWORD: ci_password
         run: ./mvnw -B verify
 
       - name: Upload test reports
