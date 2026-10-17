@@ -262,14 +262,14 @@ The Flutter client parses SSE framing and UTF-8 across network chunks. It append
 
 ## Verification
 
-Start PostgreSQL and load `deploy/.env` into the shell with the JDBC mappings shown above, then run the backend build and tests from the repository root:
+With Docker running, run the backend build and tests from the repository root:
 
 ```bash
 cd Backend
 ./mvnw clean verify
 ```
 
-The endpoint tests substitute the model-facing `GeminiAiService` and `OllamaAiService`, exercising the real selector and adapters. They verify saved/default provider selection, cross-mode follow-ups, 400/409 rejection without model calls, structured fields, stream event order and tool filtering, UUID validation, history persistence, and safe error events. The migration test verifies legacy Gemini backfill. Persistence tests verify seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call either model. Persistence test transactions roll back, but endpoint tests commit chat records and PostgreSQL identity sequences still advance. Prefer a disposable development database with the original seed data; tests use the configured `DB_*` connection. Live model tool selection and AI response quality are not covered by this suite.
+The endpoint tests substitute the model-facing `GeminiAiService` and `OllamaAiService`, exercising the real selector and adapters. They verify saved/default provider selection, cross-mode follow-ups, 400/409 rejection without model calls, structured fields, stream event order and tool filtering, UUID validation, history persistence, and safe error events. The migration test verifies legacy Gemini backfill. Persistence tests verify seeded repository reads, order totals, relationships, generated IDs, conversation isolation, and retained history after memory eviction. Three customer-tool tests exercise database aggregates, average rounding, a customer without orders, and a missing customer. Turn-aware memory tests verify whole-turn eviction and restored windows. Tests do not call either model. Tests ignore the `DB_*` variables: Quarkus Dev Services start a disposable `pgvector/pgvector:0.8.7-pg18-trixie` container for each run, apply the Flyway migrations and seed data, and remove it afterwards, so the development database is never touched. To use an existing test database instead, set `_TEST_QUARKUS_DATASOURCE_JDBC_URL`, `_TEST_QUARKUS_DATASOURCE_USERNAME` and `_TEST_QUARKUS_DATASOURCE_PASSWORD` (see [Backend/README.md](Backend/README.md#tests)). Live model tool selection and AI response quality are not covered by this suite.
 
 For the frontend, from the repository root:
 

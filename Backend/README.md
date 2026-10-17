@@ -110,7 +110,7 @@ The backend reads these environment variables in [application.properties](src/ma
 | `DB_PASSWORD` | Database password | None — required |
 | `FRONTEND_ORIGIN` | Browser origin allowed by CORS (CORS allows `POST`) | `http://127.0.0.1:3000` |
 
-`GeminiAiService` uses the named model `business-gemini` and `OllamaAiService` uses `business-ollama`. Ollama Dev Services are disabled because the backend uses an existing Ollama server. The test profile supplies placeholder Gemini and Ollama settings, so tests need no API key. The database variables are not overridden for tests.
+`GeminiAiService` uses the named model `business-gemini` and `OllamaAiService` uses `business-ollama`. Ollama Dev Services are disabled because the backend uses an existing Ollama server. The test profile supplies placeholder Gemini and Ollama settings, so tests need no API key. The `DB_*` variables apply only to dev and prod; tests use their own database (see [Tests](#tests)).
 
 The committed template is [deploy/.env.example](../deploy/.env.example); the local copy `deploy/.env` is ignored by Git. From the repository root, on first setup:
 
@@ -306,13 +306,15 @@ If the stream or the history write fails, the error is logged and the stream end
 
 ## Tests
 
-From `Backend/`, with PostgreSQL running and the environment loaded as in [Run Locally](#run-locally):
+From `Backend/`, with Docker running:
 
 ```bash
 ./mvnw -B verify
 ```
 
-The tests need a running PostgreSQL database with the pgvector extension, reached through `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`; the Compose `postgres` service provides one with Docker. They expect the original seed data. Persistence tests roll back their transactions, but endpoint tests commit chat records and identity sequences still advance, so a disposable database is preferred. No API key or model server is needed.
+The tests need Docker. Quarkus Dev Services start a disposable `pgvector/pgvector:0.8.7-pg18-trixie` container for each run, Flyway applies the migrations and seed data, and the container is removed afterwards, so every run starts from the seed data only. `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` are ignored by the tests, so the development database is never touched. Persistence tests roll back their transactions, but endpoint tests commit chat records. No API key or model server is needed.
+
+To run the tests against an existing PostgreSQL database with the pgvector extension and the original seed data instead, set `_TEST_QUARKUS_DATASOURCE_JDBC_URL`, `_TEST_QUARKUS_DATASOURCE_USERNAME` and `_TEST_QUARKUS_DATASOURCE_PASSWORD`; Dev Services then do not start. Use a disposable database, because the endpoint tests leave their chat records in it.
 
 | Test class | Covers |
 | --- | --- |
@@ -328,4 +330,4 @@ The tests do not call Gemini or Ollama and do not evaluate model answers.
 
 `./mvnw -B verify` also packages the application, which can be started from `Backend/` with `java -jar target/quarkus-app/quarkus-run.jar`. Stop dev mode first. Keep the whole `target/quarkus-app/` directory when copying the build.
 
-CI ([backend-ci.yml](../.github/workflows/backend-ci.yml)) runs `./mvnw -B verify` against a `pgvector/pgvector:0.8.7-pg18-trixie` service on pushes to `main` and pull requests that change `Backend/` or the workflow.
+CI ([backend-ci.yml](../.github/workflows/backend-ci.yml)) runs `./mvnw -B verify` with the same Dev Services database on pushes to `main` and pull requests that change `Backend/` or the workflow.
