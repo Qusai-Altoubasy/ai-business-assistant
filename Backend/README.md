@@ -198,6 +198,8 @@ PostgreSQL initializes the configured database
 
 At startup, `KnowledgeBaseIndexer` indexes the knowledge-base files into `knowledge_chunks` when `app.knowledge-base.index-at-startup` is `true` (the default; `false` in tests), embedding only new or changed chunks and logging an error without stopping the application if indexing fails.
 
+`KnowledgeRetriever.retrieve(question)` embeds a question as a query and returns up to `app.knowledge-base.retrieval.top-k` (5) of the closest chunks by cosine distance whose cosine similarity is at least `app.knowledge-base.retrieval.min-similarity`, with their source, section and rule ID; an empty list means no valid evidence. Chunks embedded with another model are ignored.
+
 PostgreSQL creates the database from `POSTGRES_DB` on first initialization. Flyway creates and changes the schema inside it; Hibernate does not create or update tables. Flyway records applied migrations in `flyway_schema_history`.
 
 | Migration | Creates |
@@ -331,8 +333,12 @@ To run the tests against an existing PostgreSQL database with the pgvector exten
 | `knowledge/KnowledgeChunksMigrationTest` | The V5 schema: the `vector` extension, the `VECTOR(768)` column, the HNSW cosine index, the dimension check and the unique `(source, chunk_index)` constraint. |
 | `knowledge/DocumentChunkerTest` | Chunks of the three knowledge-base files: the preamble, then one chunk per rule with its section and rule ID, the content format and the SHA-256 hash; a paragraph without a rule ID, a multi-line paragraph and text before the title. |
 | `knowledge/KnowledgeBaseIndexerTest` | Indexing `inventory-policy.md` with a fake embedding model, reading the rows through the `KnowledgeChunk` entity, and re-indexing: unchanged files, a changed rule, a rule removed in the middle or at the end, a removed file, another embedding model, and a failed embedding call that stops later files. Startup indexing when enabled, disabled and failing, and the rejection of an empty source list. |
+| `knowledge/KnowledgeRetrieverTest` | Retrieval with a fake embedding model and hand-made vectors: ordering by cosine similarity with source, section, rule ID and similarity, the top-k limit, the minimum similarity and the empty result, chunks of another embedding model, blank questions without an embedding call, and the question embedded as a query. |
+| `knowledge/KnowledgeRetrieverLiveTest` | Skipped unless run manually with a key: indexes the knowledge base with the real Gemini model, then checks that answered questions find their rule (for example INV-3 for "When is a product considered critical?") and that unanswered questions find no evidence. |
 
 The tests do not call Gemini or Ollama and do not evaluate model answers.
+
+Semantic retrieval is tested only manually, because it needs the real embedding model: run `./mvnw test -Dtest=KnowledgeRetrieverLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` set. CI only proves the retrieval query and threshold logic.
 
 `./mvnw -B verify` also packages the application, which can be started from `Backend/` with `java -jar target/quarkus-app/quarkus-run.jar`. Stop dev mode first. Keep the whole `target/quarkus-app/` directory when copying the build.
 
