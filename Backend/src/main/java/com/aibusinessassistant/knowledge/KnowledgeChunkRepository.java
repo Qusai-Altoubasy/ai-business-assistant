@@ -45,6 +45,23 @@ public class KnowledgeChunkRepository implements PanacheRepository<KnowledgeChun
         return find("source", Sort.by("chunkIndex"), source).project(StoredChunk.class).list();
     }
 
+    /// Ranks by cosine distance (<=>), the operator of the vector_cosine_ops HNSW index. Rows embedded with
+    /// another model are skipped, because their vectors are not comparable with the query vector.
+    @Transactional
+    public List<RetrievedChunk> findClosest(float[] query, String model, int limit) {
+        return getEntityManager().createQuery("""
+                        select new com.aibusinessassistant.knowledge.RetrievedChunk(
+                            c.source, c.section, c.ruleId, c.content, 1 - cosine_distance(c.embedding, :query))
+                        from KnowledgeChunk c
+                        where c.embeddingModel = :model
+                        order by cosine_distance(c.embedding, :query)
+                        """, RetrievedChunk.class)
+                .setParameter("query", query)
+                .setParameter("model", model)
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
     // Writes the changed chunks and removes rows past the file's last chunk, in one transaction per file.
     // The source is passed separately because rows can be removed when no chunk changed. Returns the removed rows.
     @Transactional
