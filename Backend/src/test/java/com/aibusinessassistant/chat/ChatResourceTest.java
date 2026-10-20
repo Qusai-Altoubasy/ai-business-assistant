@@ -10,11 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
+import com.aibusinessassistant.chat.ai.BusinessAnalysisAiAnswer;
 import com.aibusinessassistant.chat.ai.BusinessAnalysisService;
 import com.aibusinessassistant.chat.ai.AiProvider;
 import com.aibusinessassistant.chat.ai.GeminiAiService;
@@ -25,6 +27,9 @@ import com.aibusinessassistant.chat.dto.ChatStreamEventDTO;
 import com.aibusinessassistant.chat.dto.StreamEventType;
 import com.aibusinessassistant.chat.history.ConversationMessageRepository;
 import com.aibusinessassistant.chat.history.ConversationRepository;
+import com.aibusinessassistant.knowledge.KnowledgeEvidence;
+import com.aibusinessassistant.knowledge.RetrievedChunk;
+import com.aibusinessassistant.knowledge.dto.KnowledgeSourceDTO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -32,7 +37,9 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.service.Result;
 import dev.langchain4j.service.tool.ToolExecution;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import io.quarkiverse.langchain4j.runtime.aiservice.ChatEvent;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.helpers.test.AssertSubscriber;
@@ -53,6 +60,15 @@ class ChatResourceTest {
     static final String AI_RESPONSE = "I can help with your business questions.";
     static final List<String> INSIGHTS = List.of("Inventory and sales data are available.");
     static final List<String> RECOMMENDATIONS = List.of("Choose a product or sales period to review.");
+    // Answered by the fakes as a policy question: Gemini searches the knowledge base and cites INV-8 plus an
+    // invented id; Ollama's model fills sources in itself.
+    static final String POLICY_QUERY = "policy-request";
+    static final RetrievedChunk INV_8 = new RetrievedChunk("inventory-policy.md",
+            "Inventory policy violations and the low-stock list", "INV-8",
+            "Inventory Policy > Inventory policy violations and the low-stock list\n**INV-8** Only HEALTHY complies.",
+            0.74);
+    static final KnowledgeSourceDTO INV_8_SOURCE = new KnowledgeSourceDTO(INV_8.source(), INV_8.section(),
+            INV_8.ruleId());
 
     @Inject
     ConversationMessageRepository messages;
@@ -345,6 +361,71 @@ class ChatResourceTest {
     }
 
     @Test
+    void geminiPolicyAnswerReturnsOnlyRetrievedCitedSourcesAndStoresThem() throws JsonProcessingException {
+        UUID conversationId = UUID.randomUUID();
+        BusinessAnalysisDTO response = given()
+                .contentType(ContentType.JSON)
+                .body(new ChatRequestDTO(conversationId.toString(), POLICY_QUERY, AiProvider.GEMINI))
+                .when().post("/api/chat")
+                .then().statusCode(200).contentType(ContentType.JSON)
+                .extract().as(BusinessAnalysisDTO.class);
+
+        // The invented INV-99 is dropped.
+        BusinessAnalysisDTO expected = new BusinessAnalysisDTO(AI_RESPONSE, INSIGHTS, RECOMMENDATIONS,
+                List.of(INV_8_SOURCE));
+        assertEquals(expected, response);
+        assertEquals(expected, objectMapper.readValue(
+                messages.listByConversationId(conversationId).getLast().getContent(), BusinessAnalysisDTO.class));
+    }
+
+    @Test
+    void dataAnswersAndOllamaAnswersHaveEmptySources() {
+        given().contentType(ContentType.JSON)
+                .body(new ChatRequestDTO(UUID.randomUUID().toString(), QUERY, AiProvider.GEMINI))
+                .when().post("/api/chat")
+                .then().statusCode(200).body("sources", is(List.of()));
+
+        // Ollama's fake model fills sources in itself; the adapter discards them.
+        given().contentType(ContentType.JSON)
+                .body(new ChatRequestDTO(UUID.randomUUID().toString(), POLICY_QUERY, AiProvider.OLLAMA))
+                .when().post("/api/chat")
+                .then().statusCode(200)
+                .body("summary", is(AI_RESPONSE))
+                .body("sources", is(List.of()));
+    }
+
+    @Test
+    void historyStoredWithoutSourcesStillReads() throws JsonProcessingException {
+        String storedBeforeSources = objectMapper.writeValueAsString(
+                Map.of("summary", AI_RESPONSE, "insights", INSIGHTS, "recommendations", RECOMMENDATIONS));
+
+        assertEquals(new BusinessAnalysisDTO(AI_RESPONSE, INSIGHTS, RECOMMENDATIONS, List.of()),
+                objectMapper.readValue(storedBeforeSources, BusinessAnalysisDTO.class));
+    }
+
+    @Test
+    void knowledgeSearchStreamEventsContainOnlyTheToolName() throws JsonProcessingException {
+        UUID conversationId = UUID.randomUUID();
+        assertEquals(List.of(new ChatStreamEventDTO(StreamEventType.TOOL_STARTED, "searchKnowledgeBase"),
+                new ChatStreamEventDTO(StreamEventType.TOOL_COMPLETED, "searchKnowledgeBase"),
+                new ChatStreamEventDTO(StreamEventType.CHUNK, "USB-C Cable is CRITICAL under INV-3."),
+                new ChatStreamEventDTO(StreamEventType.DONE, null)),
+                streamEvents(conversationId, "knowledge-tool-request"));
+        assertEquals("USB-C Cable is CRITICAL under INV-3.",
+                messages.listByConversationId(conversationId).getLast().getContent());
+    }
+
+    static ToolExecution policySearch(UUID conversationId) {
+        KnowledgeEvidence evidence = new KnowledgeEvidence(List.of(INV_8));
+        return ToolExecution.builder()
+                .request(ToolExecutionRequest.builder().name("searchKnowledgeBase")
+                        .arguments("{\"query\":\"inventory policy violations\"}").build())
+                .result(ToolExecutionResult.builder().result(evidence).resultText(evidence.format()).build())
+                .invocationContext(InvocationContext.builder().chatMemoryId(conversationId).build())
+                .build();
+    }
+
+    @Test
     void chatEndpointRequiresConversationId() {
         given()
                 .contentType(ContentType.JSON)
@@ -398,6 +479,15 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
                     Multi.createFrom().item(new ChatEvent.PartialResponseEvent("Partial answer")),
                     Multi.createFrom().failure(new IllegalStateException("Provider internal credentials/details")));
         }
+        if ("knowledge-tool-request".equals(query)) {
+            ToolExecution search = ChatResourceTest.policySearch(conversationId);
+            return Multi.createFrom().items(
+                    new ChatEvent.BeforeToolExecutionEvent(search.request()),
+                    new ChatEvent.ToolExecutedEvent(search),
+                    new ChatEvent.PartialResponseEvent("USB-C Cable is CRITICAL under INV-3."),
+                    new ChatEvent.ChatCompletedEvent(ChatResponse.builder()
+                            .aiMessage(AiMessage.from("USB-C Cable is CRITICAL under INV-3.")).build()));
+        }
         if ("tool-request".equals(query)) {
             var request = ToolExecutionRequest.builder().name("getLowStockProducts")
                     .arguments("{\"internal\":\"not for the client\"}").build();
@@ -427,6 +517,10 @@ class TestBusinessAnalysisService implements BusinessAnalysisService {
         if ("provider-failure".equals(query)) {
             throw new IllegalStateException("Provider internal credentials/details");
         }
+        if (ChatResourceTest.POLICY_QUERY.equals(query)) {
+            return new BusinessAnalysisDTO(ChatResourceTest.AI_RESPONSE, ChatResourceTest.INSIGHTS,
+                    ChatResourceTest.RECOMMENDATIONS, List.of(ChatResourceTest.INV_8_SOURCE));
+        }
         return new BusinessAnalysisDTO(
                 ChatResourceTest.AI_RESPONSE,
                 ChatResourceTest.INSIGHTS,
@@ -442,8 +536,14 @@ class TestGeminiAiService implements GeminiAiService {
     private final TestBusinessAnalysisService delegate = new TestBusinessAnalysisService(AiProvider.GEMINI);
 
     @Override
-    public BusinessAnalysisDTO chat(UUID conversationId, String query) {
-        return delegate.chat(conversationId, query);
+    public Result<BusinessAnalysisAiAnswer> chat(UUID conversationId, String query) {
+        BusinessAnalysisDTO answer = delegate.chat(conversationId, query);
+        boolean policyQuery = ChatResourceTest.POLICY_QUERY.equals(query);
+        return Result.<BusinessAnalysisAiAnswer>builder()
+                .content(new BusinessAnalysisAiAnswer(answer.summary(), answer.insights(), answer.recommendations(),
+                        policyQuery ? List.of("INV-8", "INV-99") : List.of()))
+                .toolExecutions(policyQuery ? List.of(ChatResourceTest.policySearch(conversationId)) : List.of())
+                .build();
     }
 
     @Override

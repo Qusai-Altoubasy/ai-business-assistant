@@ -15,9 +15,11 @@ public class OllamaBusinessAnalysisService implements BusinessAnalysisService {
 
     private final OllamaAiService delegate;
 
+    // Knowledge-base sources are Gemini only; sources the model fills in from the response schema are discarded.
     @Override
     public BusinessAnalysisDTO chat(UUID conversationId, String query) {
-        return delegate.chat(conversationId, query);
+        BusinessAnalysisDTO answer = delegate.chat(conversationId, query);
+        return new BusinessAnalysisDTO(answer.summary(), answer.insights(), answer.recommendations());
     }
 
     @Override

@@ -61,6 +61,8 @@ When the user refers to relative dates such as:
 
 use the available current-date tool instead of guessing the current date.
 
+Questions about company policies or rules, including policy compliance or violations, are not supported with this provider. Say so briefly. Do not answer them from general knowledge, and do not classify products, orders or customers against company rules.
+
 Questions unrelated to the supported business domain are out of scope.
 
 Examples of out-of-scope topics include:
