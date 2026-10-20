@@ -31,7 +31,7 @@ The Flutter client offers Structured Chat and Streaming Chat in the sidebar. Str
 | Customer purchase statistics | `CustomerTools.getCustomerStatistics(customerId)` | Returns the customer's ID/name, order count, total spent, and average order value across all recorded orders. A missing customer is rejected; an existing customer with no orders has zero totals. |
 | Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
 
-The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy retrieval and RAG are not implemented. PostgreSQL restores the active conversation memory after a backend restart.
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy questions are answered from the knowledge base, with the policy rules that support the answer, at `POST /api/knowledge/answer` (see [Backend/README.md](Backend/README.md#post-apiknowledgeanswer)); the chat endpoints do not use the policies yet. PostgreSQL restores the active conversation memory after a backend restart.
 
 ### Prompting
 
@@ -292,7 +292,7 @@ Never commit API keys. Keep real secrets in local environment files or backend e
 2. Additional explicit read-only business tools beyond the current inventory, sales, and customer aggregates.
 3. Conversation history retrieval and resume UI.
 4. Embeddings and pgvector.
-5. RAG.
+5. RAG. **Started:** `POST /api/knowledge/answer` answers policy questions only from retrieved knowledge-base rules and returns them as sources. Next: policies in chat answers.
 6. Further reliability, security, and observability work.
 7. AI response evaluation.
 8. Potential MCP and agent integration.
