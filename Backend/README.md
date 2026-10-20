@@ -62,15 +62,17 @@ Client JSON conversationId + query + optional provider
   → JSON response or JSON SSE events
 ```
 
-`GeminiAiService` and `OllamaAiService` are `@ApplicationScoped` and use `@MemoryId` to select a separate chat memory for each conversation. Both use the system prompt from [prompts/business-analysis-system.txt](src/main/resources/prompts/business-analysis-system.txt), a temperature of `0.1`, and the same tools:
+`GeminiAiService` and `OllamaAiService` are `@ApplicationScoped` and use `@MemoryId` to select a separate chat memory for each conversation. Both use a temperature of `0.1` and the tools below. `GeminiAiService` uses the system prompt from [prompts/business-analysis-gemini-system.txt](src/main/resources/prompts/business-analysis-gemini-system.txt) and also has `searchKnowledgeBase`; `OllamaAiService` uses [prompts/business-analysis-system.txt](src/main/resources/prompts/business-analysis-system.txt). Company policy questions are supported with Gemini only:
 
 | Tool | Returns |
 | --- | --- |
 | `getLowStockProducts()` | Products at or below their minimum stock: ID, name, stock quantity, minimum stock. |
 | `getProductStock(productId)` | The same fields for one product; fails if the product does not exist. |
+| `getInventorySnapshot()` | The same fields for every product, ordered by ID, plus its `stockClass` (`OUT_OF_STOCK`, `CRITICAL`, `LOW`, `HEALTHY` or `OVERSTOCK`) computed by `StockClass` from the inventory policy thresholds INV-2 to INV-6. Which classes violate the policy and what to do come from the policy search. |
 | `getSales(from, to)` | `from`, `to`, `totalSales` and `orderCount` for an inclusive date range. |
 | `getCustomerStatistics(customerId)` | `customerId`, `customerName`, `orderCount`, `totalSpent` and `averageOrderValue` over all of the customer's orders; fails if the customer does not exist. |
 | `getCurrentDate()` | The backend's current `LocalDate`, used for relative dates. |
+| `searchKnowledgeBase(query)` | Gemini only. The knowledge-base chunks retrieved for the query as `<chunk>` blocks, or a fixed text when no policy matches. |
 
 The tools are read-only and are not exposed as REST endpoints. The saved provider's model decides which tools to call. `averageOrderValue` is `totalSpent` divided by the order count, rounded to two decimals with `RoundingMode.HALF_UP`; a customer with no orders gets zero for all three values.
 
@@ -230,7 +232,7 @@ The two chat endpoints consume `application/json`:
 
 ### `POST /api/chat`
 
-Returns `BusinessAnalysisDTO`, a record with a `summary` string and `insights` and `recommendations` string lists:
+Returns `BusinessAnalysisDTO`, a record with a `summary` string, `insights` and `recommendations` string lists, and a `sources` list. `sources` holds the knowledge-base chunks a Gemini answer cites, taken only from the searches of the same request; it is empty for data questions and for every Ollama answer:
 
 ```bash
 curl http://localhost:8080/api/chat \
@@ -242,7 +244,21 @@ curl http://localhost:8080/api/chat \
 {
   "summary": "Three products currently need restocking.",
   "insights": ["USB-C Cable has the largest gap between current and minimum stock."],
-  "recommendations": ["Prioritize replenishing USB-C Cable and the other low-stock products."]
+  "recommendations": ["Prioritize replenishing USB-C Cable and the other low-stock products."],
+  "sources": []
+}
+```
+
+A Gemini policy question, such as `"Which products currently violate our inventory policy?"`, combines the inventory tools with the knowledge base:
+
+```json
+{
+  "summary": "Four of the ten products violate the inventory policy.",
+  "insights": ["Keyboard: 50 in stock, minimum stock 10, OVERSTOCK (INV-6)."],
+  "recommendations": ["Keyboard: the policy states no restock for OVERSTOCK products (INV-10)."],
+  "sources": [
+    {"source": "inventory-policy.md", "section": "Inventory policy violations and the low-stock list", "ruleId": "INV-8"}
+  ]
 }
 ```
 
@@ -347,11 +363,15 @@ To run the tests against an existing PostgreSQL database with the pgvector exten
 
 | Test class | Covers |
 | --- | --- |
-| `chat/ChatResourceTest` | Both endpoints with test replacements for only `GeminiAiService` and `OllamaAiService`, so the real selector and adapters run: both providers, default selection, follow-ups across modes, 400/409 rejection without model calls, history and SSE events, and failure handling. |
+| `chat/ChatResourceTest` | Both endpoints with test replacements for only `GeminiAiService` and `OllamaAiService`, so the real selector and adapters run: both providers, default selection, follow-ups across modes, 400/409 rejection without model calls, history and SSE events, and failure handling. Policy sources: Gemini keeps only retrieved cited chunks, Ollama and data answers have none, history is stored with sources and still reads without them, and a knowledge search streams only its tool name. |
+| `chat/ai/GeminiBusinessAnalysisServiceTest` | Sources of a Gemini answer with a fake AI service: a cited retrieved chunk kept, an invented ID dropped, two searches merged without duplicates, no search or another tool's result giving no sources, and the answer kept when no citation is valid. |
+| `chat/InventoryPolicyLiveTest` | Skipped unless run manually with a key: "Which products currently violate our inventory policy?" calls the inventory snapshot and the knowledge-base search, cites INV-8 and names the four violating seeded products; without indexed policies it cites no rule, and without products it names no product. |
 | `chat/ConversationProviderMigrationTest` | Runs V3 and V4 in a separate schema that rolls back with the test, and checks that existing conversations become `GEMINI` conversations. |
 | `chat/memory/TurnAwareChatMemoryTest` | Whole-turn eviction, keeping the system message, and rejecting a stored window that starts mid-turn. |
 | `chat/memory/ConversationMemoryPersistenceTest` | Memory restored for the same conversation, isolation between conversations, full history kept after eviction, invalid IDs rejected. |
 | `customer/CustomerToolsTest` | Seeded customer statistics, zero totals and rounding, missing customers. |
+| `product/InventoryToolsTest` | The inventory snapshot: all 10 seeded products in ID order with their stock quantity, minimum stock and stock class, the overstocked Keyboard that `getLowStockProducts` omits, and an empty products table. |
+| `product/StockClassTest` | The stock classes of INV-2 to INV-6 at every boundary of the policy examples (minimum stock 20: 0, 1, 10, 11, 20, 21, 80, 81), exactly four times the minimum (100 of 25) as `HEALTHY`, and values outside the policy rejected. |
 | `order/BusinessPersistenceTest` | Migrations V1–V5 applied, seed data readable through repositories, seeded order totals, generated IDs and relationships. |
 | `knowledge/KnowledgeChunksMigrationTest` | The V5 schema: the `vector` extension, the `VECTOR(768)` column, the HNSW cosine index, the dimension check and the unique `(source, chunk_index)` constraint. |
 | `knowledge/DocumentChunkerTest` | Chunks of the three knowledge-base files: the preamble, then one chunk per rule with its section and rule ID, the content format and the SHA-256 hash; a paragraph without a rule ID, a multi-line paragraph and text before the title. |
@@ -359,13 +379,14 @@ To run the tests against an existing PostgreSQL database with the pgvector exten
 | `knowledge/KnowledgeRetrieverTest` | Retrieval with a fake embedding model and hand-made vectors: ordering by cosine similarity with source, section, rule ID and similarity, the top-k limit, the minimum similarity and the empty result, chunks of another embedding model, blank questions without an embedding call, and the question embedded as a query. |
 | `knowledge/KnowledgeEvidenceTest` | The `<chunk>` context in retrieval order, chunk IDs for rules and preambles, and citations mapped to sources: retrieval order, no duplicates, unknown or foreign IDs dropped, no or null citations. |
 | `knowledge/KnowledgeAnswerServiceTest` | Answering with a fake retriever and chat model: the context the model reads, no evidence answered without calling the model, an answer without a valid citation discarded, and the sources of a supported answer. |
+| `knowledge/KnowledgeBaseToolsTest` | The knowledge-base search tool with a fake retriever: the `<chunk>` text the model reads and the same evidence as the result object, the no-evidence text with empty evidence, and the query passed to the retriever. |
 | `knowledge/KnowledgeResourceTest` | `POST /api/knowledge/answer` rejects a missing body or a missing or blank question with HTTP 400. |
 | `knowledge/KnowledgeAnswerLiveTest` | Skipped unless run manually with a key: indexes the knowledge base, then checks that "What is our return policy?" is answered with REF sources, that "What is our shipping policy?" gets the insufficient answer, and that the model cites nothing when the evidence does not answer the question. |
 | `knowledge/KnowledgeRetrieverLiveTest` | Skipped unless run manually with a key: indexes the knowledge base with the real Gemini model, then checks that answered questions find their rule (for example INV-3 for "When is a product considered critical?") and that unanswered questions find no evidence. |
 
 The tests do not call Gemini or Ollama and do not evaluate model answers.
 
-Semantic retrieval is tested only manually, because it needs the real embedding model: run `./mvnw test -Dtest=KnowledgeRetrieverLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` set. CI only proves the retrieval query and threshold logic. Grounded answers are also tested only manually, because they need the real embedding and chat models: run `./mvnw test -Dtest=KnowledgeAnswerLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` and `GEMINI_MODEL` set.
+Semantic retrieval is tested only manually, because it needs the real embedding model: run `./mvnw test -Dtest=KnowledgeRetrieverLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` set. CI only proves the retrieval query and threshold logic. Grounded answers are also tested only manually, because they need the real embedding and chat models: run `./mvnw test -Dtest=KnowledgeAnswerLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` and `GEMINI_MODEL` set. The hybrid inventory and policy analysis is tested only manually in the same way: run `./mvnw test -Dtest=InventoryPolicyLiveTest -Dgemini.live=true`.
 
 `./mvnw -B verify` also packages the application, which can be started from `Backend/` with `java -jar target/quarkus-app/quarkus-run.jar`. Stop dev mode first. Keep the whole `target/quarkus-app/` directory when copying the build.
 
