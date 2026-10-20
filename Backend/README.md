@@ -218,8 +218,9 @@ Seeded order dates fall in January–March 2026. Relative-date questions such as
 | --- | --- | --- | --- |
 | `POST` | `/api/chat` | `application/json` | `ChatResource.chat` |
 | `POST` | `/api/chat/stream` | `text/event-stream` | `ChatResource.chatStream` |
+| `POST` | `/api/knowledge/answer` | `application/json` | `KnowledgeResource.answer` |
 
-Both consume `application/json`:
+The two chat endpoints consume `application/json`:
 
 ```json
 {"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Which products are low stock?","provider":"gemini"}
@@ -252,6 +253,28 @@ curl http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"What are the purchase statistics for customer ID 1?"}'
 ```
+
+### `POST /api/knowledge/answer`
+
+Answers a company-policy question only from the knowledge base, with Gemini, without chat memory or conversation history. `KnowledgeAnswerService` retrieves the closest chunks, gives them to `KnowledgeAiService` as `<chunk>` blocks, and returns the answer with only the retrieved chunks the model cites. When no chunk reaches the minimum similarity, the chat model is not called; when the model cites no retrieved chunk, its answer is discarded. Both cases return the fixed answer below with empty `sources`. A missing or blank `question` returns HTTP 400.
+
+```bash
+curl http://localhost:8080/api/knowledge/answer \
+  --header 'Content-Type: application/json' \
+  --data '{"question":"What is our return policy?"}'
+```
+
+```json
+{
+  "answer": "A customer can return an item for a refund when the return request is made no later than 30 calendar days after the order date ...",
+  "sources": [
+    {"source": "refund-policy.md", "section": "Return window and return requests", "ruleId": "REF-1"},
+    {"source": "refund-policy.md", "section": "Return window and return requests", "ruleId": "REF-3"}
+  ]
+}
+```
+
+A question the policies do not answer, such as `"What is our shipping policy?"`, returns `{"answer":"The company policies do not contain enough information to answer this question.","sources":[]}`. `ruleId` is `null` for a source that is a policy file's introduction.
 
 ### `POST /api/chat/stream`
 
@@ -334,11 +357,15 @@ To run the tests against an existing PostgreSQL database with the pgvector exten
 | `knowledge/DocumentChunkerTest` | Chunks of the three knowledge-base files: the preamble, then one chunk per rule with its section and rule ID, the content format and the SHA-256 hash; a paragraph without a rule ID, a multi-line paragraph and text before the title. |
 | `knowledge/KnowledgeBaseIndexerTest` | Indexing `inventory-policy.md` with a fake embedding model, reading the rows through the `KnowledgeChunk` entity, and re-indexing: unchanged files, a changed rule, a rule removed in the middle or at the end, a removed file, another embedding model, and a failed embedding call that stops later files. Startup indexing when enabled, disabled and failing, and the rejection of an empty source list. |
 | `knowledge/KnowledgeRetrieverTest` | Retrieval with a fake embedding model and hand-made vectors: ordering by cosine similarity with source, section, rule ID and similarity, the top-k limit, the minimum similarity and the empty result, chunks of another embedding model, blank questions without an embedding call, and the question embedded as a query. |
+| `knowledge/KnowledgeEvidenceTest` | The `<chunk>` context in retrieval order, chunk IDs for rules and preambles, and citations mapped to sources: retrieval order, no duplicates, unknown or foreign IDs dropped, no or null citations. |
+| `knowledge/KnowledgeAnswerServiceTest` | Answering with a fake retriever and chat model: the context the model reads, no evidence answered without calling the model, an answer without a valid citation discarded, and the sources of a supported answer. |
+| `knowledge/KnowledgeResourceTest` | `POST /api/knowledge/answer` rejects a missing body or a missing or blank question with HTTP 400. |
+| `knowledge/KnowledgeAnswerLiveTest` | Skipped unless run manually with a key: indexes the knowledge base, then checks that "What is our return policy?" is answered with REF sources, that "What is our shipping policy?" gets the insufficient answer, and that the model cites nothing when the evidence does not answer the question. |
 | `knowledge/KnowledgeRetrieverLiveTest` | Skipped unless run manually with a key: indexes the knowledge base with the real Gemini model, then checks that answered questions find their rule (for example INV-3 for "When is a product considered critical?") and that unanswered questions find no evidence. |
 
 The tests do not call Gemini or Ollama and do not evaluate model answers.
 
-Semantic retrieval is tested only manually, because it needs the real embedding model: run `./mvnw test -Dtest=KnowledgeRetrieverLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` set. CI only proves the retrieval query and threshold logic.
+Semantic retrieval is tested only manually, because it needs the real embedding model: run `./mvnw test -Dtest=KnowledgeRetrieverLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` set. CI only proves the retrieval query and threshold logic. Grounded answers are also tested only manually, because they need the real embedding and chat models: run `./mvnw test -Dtest=KnowledgeAnswerLiveTest -Dgemini.live=true` with `GEMINI_API_KEY` and `GEMINI_MODEL` set.
 
 `./mvnw -B verify` also packages the application, which can be started from `Backend/` with `java -jar target/quarkus-app/quarkus-run.jar`. Stop dev mode first. Keep the whole `target/quarkus-app/` directory when copying the build.
 
