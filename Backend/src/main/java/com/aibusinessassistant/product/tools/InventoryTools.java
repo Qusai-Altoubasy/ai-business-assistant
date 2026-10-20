@@ -2,6 +2,8 @@ package com.aibusinessassistant.product.tools;
 
 import com.aibusinessassistant.product.Product;
 import com.aibusinessassistant.product.ProductRepository;
+import com.aibusinessassistant.product.StockClass;
+import com.aibusinessassistant.product.dto.InventorySnapshotItemDTO;
 import com.aibusinessassistant.product.dto.LowStockProductDTO;
 import com.aibusinessassistant.product.dto.ProductStockDTO;
 import dev.langchain4j.agent.tool.P;
@@ -43,6 +45,36 @@ public class InventoryTools {
             return products;
         } catch (RuntimeException exception) {
             log.error("Tool failed: getLowStockProducts", exception);
+            throw exception;
+        }
+    }
+
+    @Tool("""
+        Returns the current stock quantity, minimum stock level and stock class of all products.
+        The stock class is computed from the inventory policy thresholds. Which stock classes
+        violate the policy and what action applies must come from the policy search.
+        Use this tool when the user asks a question that compares all products
+        against stock rules or the inventory policy.
+        """)
+    public List<InventorySnapshotItemDTO> getInventorySnapshot() {
+        log.info("Tool called: getInventorySnapshot");
+
+        try {
+            List<InventorySnapshotItemDTO> products = productRepository.findAllOrderedById()
+                    .stream()
+                    .map(product -> new InventorySnapshotItemDTO(
+                            product.getId(),
+                            product.getName(),
+                            product.getStockQuantity(),
+                            product.getMinimumStock(),
+                            StockClass.classify(product.getStockQuantity(), product.getMinimumStock())
+                    ))
+                    .toList();
+
+            log.info("Tool completed: getInventorySnapshot (productsReturned={})", products.size());
+            return products;
+        } catch (RuntimeException exception) {
+            log.error("Tool failed: getInventorySnapshot", exception);
             throw exception;
         }
     }
