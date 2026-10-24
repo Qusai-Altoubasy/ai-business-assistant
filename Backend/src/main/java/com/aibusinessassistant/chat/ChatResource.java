@@ -25,14 +25,16 @@ public class ChatResource {
 
     private final ChatService chatService;
 
+    // Both methods serve POST /api/chat; the Accept header selects one. text/event-stream streams, anything else
+    // returns JSON.
     @POST
+    @Produces(MediaType.APPLICATION_JSON)
     public BusinessAnalysisDTO chat(ChatRequestDTO request) {
         UUID conversationId = validateAndParseConversationId(request);
         return chatService.chat(conversationId, request.query(), request.provider());
     }
 
     @POST
-    @Path("/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @RestStreamElementType(MediaType.APPLICATION_JSON)
     @Blocking // Memory and history persistence use blocking JDBC.

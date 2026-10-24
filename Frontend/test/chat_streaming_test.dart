@@ -26,7 +26,7 @@ void main() {
         config: const AppConfig(apiBaseUrl: 'http://localhost:8080'),
         streamingClient: MockClient.streaming((request, body) async {
           expect(request.method, 'POST');
-          expect(request.url.path, '/api/chat/stream');
+          expect(request.url.path, '/api/chat');
           requests.add(
             jsonDecode(await utf8.decoder.bind(body).join())
                 as Map<String, dynamic>,
@@ -72,7 +72,7 @@ void main() {
         config: const AppConfig(apiBaseUrl: 'http://localhost:8080'),
         streamingClient: MockClient.streaming((request, body) async {
           expect(request.method, 'POST');
-          expect(request.url.path, '/api/chat/stream');
+          expect(request.url.path, '/api/chat');
           expect(request.headers['Accept'], 'text/event-stream');
           expect(jsonDecode(await utf8.decoder.bind(body).join()), {
             'conversationId': '550e8400-e29b-41d4-a716-446655440000',
