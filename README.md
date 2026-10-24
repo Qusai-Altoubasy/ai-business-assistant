@@ -15,9 +15,9 @@ AI Business Assistant with a Quarkus backend, PostgreSQL business data, and a Fl
 
 ## Current Features
 
-The backend exposes structured JSON at `POST /api/chat` and JSON SSE events at `POST /api/chat/stream`. Both use the conversation's saved Gemini or Ollama provider, the same business-analysis contract, resource-based business prompt, conversation memory, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
+The backend exposes one chat endpoint, `POST /api/chat`: it returns structured JSON by default and JSON SSE events when the request sends `Accept: text/event-stream`. Both modes use the conversation's saved Gemini or Ollama provider, the same business-analysis contract, resource-based business prompt, conversation memory, and read-only LangChain4j tools for inventory, sales, customer statistics, and the current application date.
 
-Both endpoints accept an optional `provider` (`gemini` or `ollama`). The first request saves that choice on the conversation; omitting it uses `AI_DEFAULT_PROVIDER` (default `GEMINI`). Follow-ups use the saved provider, even after the application default changes. Requesting a different provider for the same UUID returns HTTP 409 before generation or SSE starts; start a new conversation to switch. Unknown or blank providers return HTTP 400. The Flutter composer offers Gemini (selected initially) and Ollama in a compact menu and sends the selected `provider` on every request. The menu locks on the first send attempt, including failures, and New Chat unlocks it. V4 assigns `GEMINI` to conversations created before this feature. Concurrent requests with the same UUID are outside the supported flow; send messages sequentially.
+Both modes accept an optional `provider` (`gemini` or `ollama`). The first request saves that choice on the conversation; omitting it uses `AI_DEFAULT_PROVIDER` (default `GEMINI`). Follow-ups use the saved provider, even after the application default changes. Requesting a different provider for the same UUID returns HTTP 409 before generation or SSE starts; start a new conversation to switch. Unknown or blank providers return HTTP 400. The Flutter composer offers Gemini (selected initially) and Ollama in a compact menu and sends the selected `provider` on every request. The menu locks on the first send attempt, including failures, and New Chat unlocks it. V4 assigns `GEMINI` to conversations created before this feature. Concurrent requests with the same UUID are outside the supported flow; send messages sequentially.
 
 The Flutter client offers Structured Chat and Streaming Chat in the sidebar. Structured Chat renders the `BusinessAnalysisDTO` summary, insights, and recommendations. Streaming Chat updates one assistant message as `CHUNK` events arrive and shows temporary tool progress; `DONE` finishes the response, while `ERROR` shows a safe retryable error and preserves partial text. Both modes share one screen, editable suggested prompts, and a stable UUID `conversationId`. Messages displayed in the current tab live in Riverpod state; the backend persists successful user/assistant exchanges and retains the latest 10 whole user turns as active AI context. Mode switches preserve the conversation ID; New Chat creates a new ID, clears the UI, and keeps the selected mode and provider while allowing a new provider choice. The sidebar lists chat modes and example-question labels rather than stored conversations.
 
@@ -31,7 +31,7 @@ The Flutter client offers Structured Chat and Streaming Chat in the sidebar. Str
 | Customer purchase statistics | `CustomerTools.getCustomerStatistics(customerId)` | Returns the customer's ID/name, order count, total spent, and average order value across all recorded orders. A missing customer is rejected; an existing customer with no orders has zero totals. |
 | Relative dates | `CommonTools.getCurrentDate()` | Returns the backend's current `LocalDate` for questions such as "last month". |
 
-The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy questions are answered from the knowledge base, with the policy rules that support the answer, at `POST /api/knowledge/answer` (see [Backend/README.md](Backend/README.md#post-apiknowledgeanswer)); the chat endpoints do not use the policies yet. PostgreSQL restores the active conversation memory after a backend restart.
+The seed data covers January–March 2026. A question about last month uses the backend's current date and may return no sales outside that seeded period. Customer statistics use all recorded orders, without a date filter; averages are rounded to two decimal places with `HALF_UP`. Company-policy questions are answered from the knowledge base, with the policy rules that support the answer, in Gemini chat answers, which can search the knowledge base and return the policy rules they cite as `sources` in JSON mode; Ollama answers do not use the policies and have empty `sources`. `POST /api/knowledge/answer` answers policy questions only from retrieved knowledge-base rules (see [Backend/README.md](Backend/README.md#post-apiknowledgeanswer)). PostgreSQL restores the active conversation memory after a backend restart.
 
 ### Prompting
 
@@ -217,11 +217,11 @@ On backend startup, Flyway applies `V1__create_business_schema.sql`, `V2__seed_b
 
 ## API
 
-Both chat endpoints consume `application/json` with `ChatRequestDTO`: a required UUID `conversationId`, a `query` string, and an optional `provider` (`gemini` or `ollama`). Reuse the ID and its saved provider for follow-up questions; use a new UUID to change providers or start a new chat.
+`POST /api/chat` consumes `application/json` with `ChatRequestDTO`: a required UUID `conversationId`, a `query` string, and an optional `provider` (`gemini` or `ollama`). Reuse the ID and its saved provider for follow-up questions; use a new UUID to change providers or start a new chat. The `Accept` header selects the mode: `text/event-stream` streams, and anything else, including `*/*` or no `Accept` header, returns JSON. `POST /api/chat/stream` no longer exists and returns HTTP 404.
 
-### `POST /api/chat`
+### `POST /api/chat` (JSON)
 
-Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings. Flutter uses this endpoint in Structured Chat. There is no separate business-analysis route or free-form response endpoint.
+Returns structured AI output mapped to `BusinessAnalysisDTO`: `summary` is a string; `insights` and `recommendations` are lists of strings; `sources` lists the knowledge-base rules a Gemini answer cites and is empty for data questions and for Ollama. Sources are returned only in JSON mode. Flutter uses this mode in Structured Chat. There is no separate business-analysis route or free-form response endpoint.
 
 ```bash
 curl --request POST http://localhost:8080/api/chat \
@@ -239,20 +239,21 @@ Illustrative response:
   ],
   "recommendations": [
     "Prioritize replenishing USB-C Cable and the other low-stock products."
-  ]
+  ],
+  "sources": []
 }
 ```
 
 Generated responses vary. Calling the endpoint sends the query to the saved provider; Gemini may incur API usage costs. Flutter preserves the structured fields and hides empty insight/recommendation sections.
 
-Other supported queries include `"How much did we sell from January 1 to March 31, 2026?"`, `"What is the current stock for product ID 1?"`, and `"What are the purchase statistics for customer ID 1?"`. With the original seed data, customer 1 (Maya Reed) has three orders totaling `483.00`, with an average order value of `161.00`. These values are internal tool data; the HTTP response remains the same three analysis fields.
+Other supported queries include `"How much did we sell from January 1 to March 31, 2026?"`, `"What is the current stock for product ID 1?"`, and `"What are the purchase statistics for customer ID 1?"`. With the original seed data, customer 1 (Maya Reed) has three orders totaling `483.00`, with an average order value of `161.00`. These values are internal tool data; the HTTP response keeps the same analysis fields.
 
-### `POST /api/chat/stream`
+### `POST /api/chat` with `Accept: text/event-stream` (streaming)
 
-Returns `text/event-stream` with JSON `data:` values. Events can be `TOOL_STARTED`, `TOOL_COMPLETED`, `CHUNK`, `DONE`, or `ERROR`. Tool events expose a tool name, not its arguments or result. Text arrives in actual provider chunks; `DONE` follows successful history persistence, while failures produce a safe `ERROR` without `DONE`.
+Returns `text/event-stream` with JSON `data:` values. Events can be `TOOL_STARTED`, `TOOL_COMPLETED`, `CHUNK`, `DONE`, or `ERROR`. Tool events expose a tool name, not its arguments or result. Text arrives in actual provider chunks; `DONE` follows successful history persistence, while failures produce a safe `ERROR` without `DONE`. The stream has no sources; use JSON mode to get them.
 
 ```bash
-curl -N http://localhost:8080/api/chat/stream \
+curl -N http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --header 'Accept: text/event-stream' \
   --data '{"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Which products are low stock?"}'
@@ -292,7 +293,7 @@ Never commit API keys. Keep real secrets in local environment files or backend e
 2. Additional explicit read-only business tools beyond the current inventory, sales, and customer aggregates.
 3. Conversation history retrieval and resume UI.
 4. Embeddings and pgvector.
-5. RAG. **Started:** `POST /api/knowledge/answer` answers policy questions only from retrieved knowledge-base rules and returns them as sources. Next: policies in chat answers.
+5. RAG. **Started:** Gemini chat answers combine business data with the company policies and return the cited rules as sources in JSON mode; Ollama answers do not use the policies. `POST /api/knowledge/answer` answers policy questions only from retrieved knowledge-base rules.
 6. Further reliability, security, and observability work.
 7. AI response evaluation.
 8. Potential MCP and agent integration.

@@ -1,6 +1,6 @@
 # AI Business Assistant — Backend
 
-The Quarkus backend for AI Business Assistant. It exposes a structured chat endpoint and a streaming chat endpoint that answer business questions with Gemini or the company's Ollama server. The model reads inventory, sales and customer data from PostgreSQL through read-only tools. Conversation history and the active chat memory are stored in PostgreSQL.
+The Quarkus backend for AI Business Assistant. It exposes one chat endpoint, which returns structured JSON or streams its answer depending on the `Accept` header, to answer business questions with Gemini or the company's Ollama server. The model reads inventory, sales and customer data from PostgreSQL through read-only tools. Conversation history and the active chat memory are stored in PostgreSQL.
 
 ## Tech Stack
 
@@ -93,7 +93,7 @@ These are model instructions, not API validation or a guarantee of factual accur
 
 ### Logging
 
-`ChatService` logs each AI request with the conversation ID, provider and duration, plus the query length and memory size for `/api/chat`. Each tool logs its call, its arguments or result counts, and failures. The query text is not logged.
+`ChatService` logs each AI request with the conversation ID, provider and duration, plus the query length and memory size for JSON requests. Each tool logs its call, its arguments or result counts, and failures. The query text is not logged.
 
 ## Configuration
 
@@ -218,21 +218,21 @@ Seeded order dates fall in January–March 2026. Relative-date questions such as
 
 | Method | Path | Produces | Resource method |
 | --- | --- | --- | --- |
-| `POST` | `/api/chat` | `application/json` | `ChatResource.chat` |
-| `POST` | `/api/chat/stream` | `text/event-stream` | `ChatResource.chatStream` |
+| `POST` | `/api/chat` | `application/json` (default) | `ChatResource.chat` |
+| `POST` | `/api/chat` with `Accept: text/event-stream` | `text/event-stream` | `ChatResource.chatStream` |
 | `POST` | `/api/knowledge/answer` | `application/json` | `KnowledgeResource.answer` |
 
-The two chat endpoints consume `application/json`:
+`ChatResource.chat` and `ChatResource.chatStream` serve the same path and differ only in `@Produces`, so Quarkus REST selects one from the `Accept` header: `text/event-stream` selects the stream; `application/json`, `*/*` or no `Accept` header selects JSON. `POST /api/chat/stream` was removed and returns HTTP 404. Both modes consume `application/json`:
 
 ```json
 {"conversationId":"1f5299c7-84a5-4a89-a5e4-1058debf4a31","query":"Which products are low stock?","provider":"gemini"}
 ```
 
-`conversationId` must be a UUID; a missing or invalid value returns HTTP 400. Reuse the ID for follow-up questions. `provider` is optional (see [Switching the AI provider](#switching-the-ai-provider)). Send requests for the same conversation one at a time, including requests that mix the two endpoints. Calling either endpoint sends the query to the selected provider. The responses below are illustrative.
+`conversationId` must be a UUID; a missing or invalid value returns HTTP 400. Reuse the ID for follow-up questions. `provider` is optional (see [Switching the AI provider](#switching-the-ai-provider)). Send requests for the same conversation one at a time, including requests that mix the two modes. Calling either mode sends the query to the selected provider. The responses below are illustrative.
 
-### `POST /api/chat`
+### `POST /api/chat` (JSON)
 
-Returns `BusinessAnalysisDTO`, a record with a `summary` string, `insights` and `recommendations` string lists, and a `sources` list. `sources` holds the knowledge-base chunks a Gemini answer cites, taken only from the searches of the same request; it is empty for data questions and for every Ollama answer:
+Returns `BusinessAnalysisDTO`, a record with a `summary` string, `insights` and `recommendations` string lists, and a `sources` list. `sources` holds the knowledge-base chunks a Gemini answer cites, taken only from the searches of the same request; it is empty for data questions and for every Ollama answer. Sources are returned only in JSON mode; the stream has none:
 
 ```bash
 curl http://localhost:8080/api/chat \
@@ -292,14 +292,14 @@ curl http://localhost:8080/api/knowledge/answer \
 
 A question the policies do not answer, such as `"What is our shipping policy?"`, returns `{"answer":"The company policies do not contain enough information to answer this question.","sources":[]}`. `ruleId` is `null` for a source that is a policy file's introduction.
 
-### `POST /api/chat/stream`
+### `POST /api/chat` with `Accept: text/event-stream` (streaming)
 
-Returns JSON SSE `data:` events with a `type` of `CHUNK`, `TOOL_STARTED`, `TOOL_COMPLETED`, `DONE` or `ERROR`.
+Returns JSON SSE `data:` events with a `type` of `CHUNK`, `TOOL_STARTED`, `TOOL_COMPLETED`, `DONE` or `ERROR`. There is no sources event; policy sources are returned only in JSON mode.
 
 General question:
 
 ```bash
-curl -N http://localhost:8080/api/chat/stream \
+curl -N http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --header 'Accept: text/event-stream' \
   --data '{"conversationId":"f9019d76-2372-49e2-bef9-c05d0ad1c925","query":"Give me a short business analysis about reducing excess inventory."}'
@@ -308,7 +308,7 @@ curl -N http://localhost:8080/api/chat/stream \
 Question that calls a tool:
 
 ```bash
-curl -N http://localhost:8080/api/chat/stream \
+curl -N http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --header 'Accept: text/event-stream' \
   --data '{"conversationId":"03da41ca-af68-49ce-ae03-89ea95d5de2c","query":"Which products are low stock?"}'
@@ -327,12 +327,12 @@ data: {"type":"DONE","content":null}
 Follow-up using memory (run in order with the same UUID):
 
 ```bash
-curl -N http://localhost:8080/api/chat/stream \
+curl -N http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --header 'Accept: text/event-stream' \
   --data '{"conversationId":"0dc136ef-58ba-48de-a41a-c6f8a490fb1c","query":"Show me customer 2 statistics."}'
 
-curl -N http://localhost:8080/api/chat/stream \
+curl -N http://localhost:8080/api/chat \
   --header 'Content-Type: application/json' \
   --header 'Accept: text/event-stream' \
   --data '{"conversationId":"0dc136ef-58ba-48de-a41a-c6f8a490fb1c","query":"How much did they spend?"}'
@@ -363,7 +363,7 @@ To run the tests against an existing PostgreSQL database with the pgvector exten
 
 | Test class | Covers |
 | --- | --- |
-| `chat/ChatResourceTest` | Both endpoints with test replacements for only `GeminiAiService` and `OllamaAiService`, so the real selector and adapters run: both providers, default selection, follow-ups across modes, 400/409 rejection without model calls, history and SSE events, and failure handling. Policy sources: Gemini keeps only retrieved cited chunks, Ollama and data answers have none, history is stored with sources and still reads without them, and a knowledge search streams only its tool name. |
+| `chat/ChatResourceTest` | Both modes of `POST /api/chat` with test replacements for only `GeminiAiService` and `OllamaAiService`, so the real selector and adapters run: JSON as the default for `*/*`, `application/json` and no `Accept` header, 404 for the removed `/api/chat/stream`, both providers, default selection, follow-ups across modes, the same 400/409 rejection in both modes without model calls, history and SSE events, and failure handling. Policy sources: Gemini keeps only retrieved cited chunks, Ollama and data answers have none, history is stored with sources and still reads without them, and a knowledge search streams only its tool name. |
 | `chat/ai/GeminiBusinessAnalysisServiceTest` | Sources of a Gemini answer with a fake AI service: a cited retrieved chunk kept, an invented ID dropped, two searches merged without duplicates, no search or another tool's result giving no sources, and the answer kept when no citation is valid. |
 | `chat/InventoryPolicyLiveTest` | Skipped unless run manually with a key: "Which products currently violate our inventory policy?" calls the inventory snapshot and the knowledge-base search, cites INV-8 and names the four violating seeded products; without indexed policies it cites no rule, and without products it names no product. |
 | `chat/ConversationProviderMigrationTest` | Runs V3 and V4 in a separate schema that rolls back with the test, and checks that existing conversations become `GEMINI` conversations. |
