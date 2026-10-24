@@ -26,7 +26,7 @@ class ChatRemoteDataSource {
     }
     final lines = _apiClient
         .postStream(
-          '/api/chat/stream',
+          '/api/chat',
           data: {
             'conversationId': conversationId,
             'query': normalized,

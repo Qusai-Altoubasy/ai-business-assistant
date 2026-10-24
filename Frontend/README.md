@@ -12,7 +12,8 @@ checkmark identifying the selection.
 
 - Flutter stable (the project was generated with Flutter 3.44 and Dart 3.12)
 - Chrome for Flutter Web, or the Linux desktop toolchain
-- The backend running and exposing `POST /api/chat` and `POST /api/chat/stream`
+- The backend running and exposing `POST /api/chat` (JSON by default, SSE with
+  `Accept: text/event-stream`)
 
 ## Install
 
@@ -62,7 +63,8 @@ address reachable from that device instead of `localhost`.
   provider requires New Chat.
 - Renders structured `summary`, `insights`, and `recommendations` inside the
   existing assistant message. Empty list sections are hidden.
-- Streaming Chat consumes JSON SSE events from `POST /api/chat/stream` and appends
+- Streaming Chat sends `Accept: text/event-stream` to `POST /api/chat`, consumes its
+  JSON SSE events, and appends
   each CHUNK exactly as received to one assistant message. Tool events show temporary
   inventory/customer/sales progress, not separate chat messages. DONE finalizes the
   response; ERROR or a connection ending without DONE preserves partial text and
@@ -114,6 +116,9 @@ flow, so it retains the provider locally for the lifetime of each conversation.
 
 `POST /api/chat` now returns the structured analysis directly. The previous
 separate business-analysis route and free-form `response` contract are removed.
+Structured and Streaming Chat use the same path; the `Accept` header selects the
+mode, and the former `/api/chat/stream` path is gone. Policy `sources` are
+returned only in JSON mode; the stream has none.
 
 ## Architecture
 

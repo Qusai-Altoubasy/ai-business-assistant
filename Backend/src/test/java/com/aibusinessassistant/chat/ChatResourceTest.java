@@ -8,6 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +49,7 @@ import io.quarkiverse.langchain4j.runtime.aiservice.ChatEvent;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.helpers.test.AssertSubscriber;
 import io.smallrye.mutiny.operators.multi.processors.UnicastProcessor;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.vertx.core.Context;
@@ -57,6 +63,8 @@ import jakarta.inject.Inject;
 class ChatResourceTest {
 
     private static final String QUERY = "What can you help me with?";
+    // The Accept values that select JSON and SSE on POST /api/chat.
+    private static final List<String> MODES = List.of("application/json", "text/event-stream");
     static final String AI_RESPONSE = "I can help with your business questions.";
     static final List<String> INSIGHTS = List.of("Inventory and sales data are available.");
     static final List<String> RECOMMENDATIONS = List.of("Choose a product or sales period to review.");
@@ -84,6 +92,39 @@ class ChatResourceTest {
 
     @Inject
     Vertx vertx;
+
+    @TestHTTPResource("/api/chat")
+    URI chatUri;
+
+    @Test
+    void defaultModeIsJson() throws IOException, InterruptedException {
+        // RestAssured sends Accept: */* unless told otherwise.
+        for (String accept : List.of("*/*", "application/json")) {
+            BusinessAnalysisDTO response = given().contentType(ContentType.JSON).accept(accept)
+                    .body(new ChatRequestDTO(UUID.randomUUID().toString(), QUERY))
+                    .when().post("/api/chat")
+                    .then().statusCode(200).contentType(ContentType.JSON)
+                    .extract().as(BusinessAnalysisDTO.class);
+            assertEquals(new BusinessAnalysisDTO(AI_RESPONSE, INSIGHTS, RECOMMENDATIONS), response, accept);
+        }
+
+        // The JDK client sends no Accept header unless one is set.
+        HttpRequest request = HttpRequest.newBuilder(chatUri)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(
+                        new ChatRequestDTO(UUID.randomUUID().toString(), QUERY))))
+                .build();
+        assertTrue(request.headers().firstValue("Accept").isEmpty());
+        HttpResponse<String> response;
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+        assertEquals(200, response.statusCode());
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("application/json"),
+                response.headers().toString());
+        assertEquals(new BusinessAnalysisDTO(AI_RESPONSE, INSIGHTS, RECOMMENDATIONS),
+                objectMapper.readValue(response.body(), BusinessAnalysisDTO.class));
+    }
 
     @Test
     void omittedProviderUsesTheConfiguredDefault() {
@@ -113,11 +154,37 @@ class ChatResourceTest {
 
             given().contentType(ContentType.JSON).accept("text/event-stream")
                     .body(new ChatRequestDTO(id.toString(), QUERY, provider))
-                    .when().post("/api/chat/stream").then().statusCode(200)
+                    .when().post("/api/chat").then().statusCode(200)
                     .contentType("text/event-stream");
             assertEquals(provider, TestBusinessAnalysisService.lastProvider);
             assertEquals(6, messages.listByConversationId(id).size());
         }
+    }
+
+    @Test
+    void sameRequestInBothModesUsesTheSameConversation() {
+        UUID id = UUID.randomUUID();
+        ChatRequestDTO request = new ChatRequestDTO(id.toString(), QUERY, AiProvider.OLLAMA);
+
+        given().contentType(ContentType.JSON).accept(ContentType.JSON).body(request)
+                .when().post("/api/chat").then().statusCode(200).contentType(ContentType.JSON);
+        assertEquals(AiProvider.OLLAMA, TestBusinessAnalysisService.lastProvider);
+
+        given().contentType(ContentType.JSON).accept("text/event-stream").body(request)
+                .when().post("/api/chat").then().statusCode(200).contentType("text/event-stream");
+        assertEquals(AiProvider.OLLAMA, TestBusinessAnalysisService.lastProvider);
+        assertEquals(id, TestBusinessAnalysisService.lastConversationId);
+
+        assertEquals(AiProvider.OLLAMA, conversations.findById(id).getProvider());
+        assertEquals(4, messages.listByConversationId(id).size());
+    }
+
+    @Test
+    void oldStreamPathIsGone() {
+        given().contentType(ContentType.JSON).accept("text/event-stream")
+                .body(new ChatRequestDTO(UUID.randomUUID().toString(), QUERY))
+                .when().post("/api/chat/stream")
+                .then().statusCode(404);
     }
 
     @Test
@@ -126,7 +193,7 @@ class ChatResourceTest {
             UUID id = UUID.randomUUID();
             given().contentType(ContentType.JSON).accept("text/event-stream")
                     .body(new ChatRequestDTO(id.toString(), QUERY, provider))
-                    .when().post("/api/chat/stream").then().statusCode(200);
+                    .when().post("/api/chat").then().statusCode(200);
             assertEquals(provider, TestBusinessAnalysisService.lastProvider);
 
             given().contentType(ContentType.JSON)
@@ -147,11 +214,10 @@ class ChatResourceTest {
             AiProvider other = provider == AiProvider.GEMINI ? AiProvider.OLLAMA : AiProvider.GEMINI;
             int callsBefore = TestBusinessAnalysisService.invocations;
 
-            for (String endpoint : List.of("/api/chat", "/api/chat/stream")) {
-                given().contentType(ContentType.JSON)
-                        .accept(endpoint.endsWith("/stream") ? "text/event-stream" : "application/json")
+            for (String accept : MODES) {
+                given().contentType(ContentType.JSON).accept(accept)
                         .body(new ChatRequestDTO(id.toString(), "switch", other))
-                        .when().post(endpoint).then().statusCode(409);
+                        .when().post("/api/chat").then().statusCode(409);
             }
 
             assertEquals(callsBefore, TestBusinessAnalysisService.invocations);
@@ -162,13 +228,13 @@ class ChatResourceTest {
 
     @Test
     void invalidProvidersAreRejectedBeforeCreatingConversationOrCallingModel() {
-        for (String endpoint : List.of("/api/chat", "/api/chat/stream")) {
+        for (String accept : MODES) {
             for (String value : List.of("\"unknown\"", "\"\"", "42")) {
                 UUID id = UUID.randomUUID();
                 int callsBefore = TestBusinessAnalysisService.invocations;
-                given().contentType(ContentType.JSON)
+                given().contentType(ContentType.JSON).accept(accept)
                         .body("{\"conversationId\":\"" + id + "\",\"query\":\"test\",\"provider\":" + value + "}")
-                        .when().post(endpoint).then().statusCode(400);
+                        .when().post("/api/chat").then().statusCode(400);
                 assertEquals(callsBefore, TestBusinessAnalysisService.invocations);
                 assertNull(conversations.findById(id));
             }
@@ -308,7 +374,7 @@ class ChatResourceTest {
                 .contentType(ContentType.JSON)
                 .accept("text/event-stream")
                 .body(new ChatRequestDTO(conversationId.toString(), query))
-                .when().post("/api/chat/stream")
+                .when().post("/api/chat")
                 .then().statusCode(200).contentType("text/event-stream")
                 .extract().asString();
         List<ChatStreamEventDTO> events = new ArrayList<>();
@@ -332,8 +398,25 @@ class ChatResourceTest {
                     .contentType(ContentType.JSON)
                     .accept("text/event-stream")
                     .body(body)
-                    .when().post("/api/chat/stream")
+                    .when().post("/api/chat")
                     .then().statusCode(400);
+        }
+    }
+
+    @Test
+    void invalidConversationIdGivesTheSame400InBothModes() {
+        for (String body : List.of("null", "{\"query\":\"test\"}",
+                "{\"conversationId\":\" \"}", "{\"conversationId\":\"not-a-uuid\"}")) {
+            List<String> errorBodies = new ArrayList<>();
+            for (String accept : MODES) {
+                int callsBefore = TestBusinessAnalysisService.invocations;
+                errorBodies.add(given().contentType(ContentType.JSON).accept(accept).body(body)
+                        .when().post("/api/chat")
+                        .then().statusCode(400)
+                        .extract().asString());
+                assertEquals(callsBefore, TestBusinessAnalysisService.invocations);
+            }
+            assertEquals(errorBodies.getFirst(), errorBodies.getLast(), body);
         }
     }
 
