@@ -8,16 +8,22 @@ import com.aibusinessassistant.product.dto.LowStockProductDTO;
 import com.aibusinessassistant.product.dto.ProductStockDTO;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.internal.Json;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.Optional;
 
 @ApplicationScoped
 @RequiredArgsConstructor
 @Slf4j
 public class InventoryTools {
+
+    // A missing product is an answer the model can give, not a failure of the request.
+    public static final String PRODUCT_NOT_FOUND = "No product found with id %d.";
 
     private final ProductRepository productRepository;
 
@@ -84,17 +90,19 @@ public class InventoryTools {
         Use this tool when the user asks about the current inventory level,
         available quantity, or minimum stock level of a specific product.
         """)
-    public ProductStockDTO getProductStock(
+    public ToolExecutionResult getProductStock(
             @P("ID of the product whose current stock information should be retrieved")
             Long productId) {
         log.info("Tool called: getProductStock (productId={})", productId);
 
-        Product product = productRepository.findByIdOptional(productId)
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Product not found with id: " + productId
-                        )
-                );
+        Optional<Product> found = productRepository.findByIdOptional(productId);
+        if (found.isEmpty()) {
+            log.info("Tool completed: getProductStock (productId={}, found=false)", productId);
+            return ToolExecutionResult.builder()
+                    .resultText(PRODUCT_NOT_FOUND.formatted(productId))
+                    .build();
+        }
+        Product product = found.get();
 
         ProductStockDTO result = new ProductStockDTO(
                 product.getId(),
@@ -108,6 +116,10 @@ public class InventoryTools {
                 product.getId(),
                 product.getStockQuantity()
         );
-        return result;
+        // The same JSON text the tool executor writes for a returned object.
+        return ToolExecutionResult.builder()
+                .result(result)
+                .resultText(Json.toJson(result))
+                .build();
     }
 }

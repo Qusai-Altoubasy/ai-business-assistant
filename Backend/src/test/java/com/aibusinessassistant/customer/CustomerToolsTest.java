@@ -1,7 +1,8 @@
 package com.aibusinessassistant.customer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -15,6 +16,8 @@ import com.aibusinessassistant.customer.tools.CustomerTools;
 import com.aibusinessassistant.order.Order;
 import com.aibusinessassistant.order.OrderRepository;
 
+import dev.langchain4j.internal.Json;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -34,7 +37,7 @@ class CustomerToolsTest {
     @Test
     @TestTransaction
     void seededCustomerStatisticsIncludeAllRecordedOrders() {
-        CustomerStatisticsDTO result = tools.getCustomerStatistics(1L);
+        CustomerStatisticsDTO result = statistics(1L);
 
         assertEquals(1L, result.customerId());
         assertEquals("Maya Reed", result.customerName());
@@ -51,7 +54,7 @@ class CustomerToolsTest {
         customer.setEmail("statistics-" + UUID.randomUUID() + "@example.com");
         customers.persistAndFlush(customer);
 
-        CustomerStatisticsDTO empty = tools.getCustomerStatistics(customer.getId());
+        CustomerStatisticsDTO empty = statistics(customer.getId());
         assertEquals(0, empty.orderCount());
         assertEquals(0, empty.totalSpent().compareTo(BigDecimal.ZERO));
         assertEquals(BigDecimal.ZERO, empty.averageOrderValue());
@@ -65,7 +68,7 @@ class CustomerToolsTest {
         }
         orders.flush();
 
-        CustomerStatisticsDTO result = tools.getCustomerStatistics(customer.getId());
+        CustomerStatisticsDTO result = statistics(customer.getId());
         assertEquals(3, result.orderCount());
         assertEquals(0, new BigDecimal("2.00").compareTo(result.totalSpent()));
         assertEquals(new BigDecimal("0.67"), result.averageOrderValue());
@@ -73,10 +76,23 @@ class CustomerToolsTest {
 
     @Test
     @TestTransaction
-    void missingCustomerIsRejected() {
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> tools.getCustomerStatistics(-1L));
+    void foundCustomerIsReturnedAsTheResultObjectAndAsJsonText() {
+        ToolExecutionResult result = tools.getCustomerStatistics(1L);
 
-        assertEquals("Customer not found with id: -1", exception.getMessage());
+        assertEquals(Json.toJson(result.result()), result.resultText());
+        assertTrue(result.resultText().contains("Maya Reed"), result.resultText());
+    }
+
+    @Test
+    @TestTransaction
+    void missingCustomerReturnsTheNotFoundResult() {
+        ToolExecutionResult result = tools.getCustomerStatistics(99L);
+
+        assertEquals("No customer found with id 99.", result.resultText());
+        assertNull(result.result());
+    }
+
+    private CustomerStatisticsDTO statistics(Long customerId) {
+        return (CustomerStatisticsDTO) tools.getCustomerStatistics(customerId).result();
     }
 }
