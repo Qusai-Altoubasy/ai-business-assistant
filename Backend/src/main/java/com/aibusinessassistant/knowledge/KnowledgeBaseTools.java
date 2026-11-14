@@ -34,7 +34,8 @@ public class KnowledgeBaseTools {
         try {
             KnowledgeEvidence evidence = new KnowledgeEvidence(retriever.retrieve(query));
 
-            log.info("Tool completed: searchKnowledgeBase (chunksReturned={})", evidence.chunks().size());
+            log.info("Tool completed: searchKnowledgeBase (chunksReturned={}, chunkIds={})", evidence.chunks().size(),
+                    evidence.chunks().stream().map(KnowledgeEvidence::chunkId).toList());
             return ToolExecutionResult.builder()
                     .result(evidence)
                     .resultText(evidence.isEmpty() ? NO_EVIDENCE : evidence.format())

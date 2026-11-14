@@ -48,8 +48,8 @@ public class ChatService {
                     chatMemoryStore.getMessages(conversationId).size());
             return response;
         } catch (RuntimeException exception) {
-            log.error("AI request failed: business-analysis (provider={}, durationMs={})",
-                    provider, elapsedMilliseconds(startedAtNanos), exception);
+            log.error("AI request failed: business-analysis (conversationId={}, provider={}, durationMs={})",
+                    conversationId, provider, elapsedMilliseconds(startedAtNanos), exception);
             throw exception;
         }
     }

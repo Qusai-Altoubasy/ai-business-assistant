@@ -32,14 +32,14 @@ public class KnowledgeAnswerService {
             KnowledgeEvidence evidence = new KnowledgeEvidence(retriever.retrieve(question));
             if (evidence.isEmpty()) {
                 // No evidence: the chat model is not called.
-                logCompleted(0, 0, 0, true, startedAtNanos);
+                logCompleted(evidence, 0, 0, true, startedAtNanos);
                 return insufficient();
             }
 
             KnowledgeAiAnswer result = aiService.answer(evidence.format(), question);
             List<KnowledgeSourceDTO> sources = evidence.sourcesFor(result.citations());
             int citedIds = result.citations() == null ? 0 : new HashSet<>(result.citations()).size();
-            logCompleted(evidence.chunks().size(), sources.size(), citedIds - sources.size(), false, startedAtNanos);
+            logCompleted(evidence, sources.size(), citedIds - sources.size(), false, startedAtNanos);
 
             // An answer that cites nothing valid is not supported by the evidence.
             return sources.isEmpty() ? insufficient() : new KnowledgeAnswerDTO(result.answer(), sources);
@@ -54,11 +54,12 @@ public class KnowledgeAnswerService {
         return new KnowledgeAnswerDTO(INSUFFICIENT, List.of());
     }
 
-    private static void logCompleted(int retrievedChunks, int validCitations, int droppedCitations,
+    private static void logCompleted(KnowledgeEvidence evidence, int validCitations, int droppedCitations,
                                      boolean modelSkipped, long startedAtNanos) {
-        log.info("AI request completed: knowledge-answer (retrievedChunks={}, validCitations={}, droppedCitations={}, "
-                        + "modelSkipped={}, durationMs={})",
-                retrievedChunks, validCitations, droppedCitations, modelSkipped, elapsedMilliseconds(startedAtNanos));
+        log.info("AI request completed: knowledge-answer (retrievedChunks={}, chunkIds={}, validCitations={}, "
+                        + "droppedCitations={}, modelSkipped={}, durationMs={})",
+                evidence.chunks().size(), evidence.chunks().stream().map(KnowledgeEvidence::chunkId).toList(),
+                validCitations, droppedCitations, modelSkipped, elapsedMilliseconds(startedAtNanos));
     }
 
     private static Integer questionLength(String question) {
