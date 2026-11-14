@@ -1,6 +1,7 @@
 package com.aibusinessassistant.knowledge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -47,6 +48,15 @@ class KnowledgeBaseToolsTest {
         tools(List.of(INV_8)).searchKnowledgeBase(QUERY);
 
         assertEquals(List.of(QUERY), retrievedQueries);
+    }
+
+    @Test
+    void anEmbeddingFailureIsRethrown() {
+        // The query is embedded before the database is read, so no repository is needed.
+        KnowledgeBaseTools tools = new KnowledgeBaseTools(new KnowledgeRetriever(
+                new EmbeddingService(new RecordingEmbeddingModel(EmbeddingService.DIMENSION).failOnCall(1)), null, 5, 0.66));
+
+        assertThrows(IllegalStateException.class, () -> tools.searchKnowledgeBase(QUERY));
     }
 
     private KnowledgeBaseTools tools(List<RetrievedChunk> chunks) {

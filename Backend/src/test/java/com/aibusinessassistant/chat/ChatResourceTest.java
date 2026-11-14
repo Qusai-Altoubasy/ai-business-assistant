@@ -265,6 +265,20 @@ class ChatResourceTest {
     }
 
     @Test
+    void jsonFailureReturns500WithoutAnAnswerOrHistory() {
+        UUID conversationId = UUID.randomUUID();
+        // The test profile adds the stack trace to the 500 body; production returns only an error id.
+        String body = given().contentType(ContentType.JSON).accept(ContentType.JSON)
+                .body(new ChatRequestDTO(conversationId.toString(), "provider-failure"))
+                .when().post("/api/chat")
+                .then().statusCode(500)
+                .extract().asString();
+
+        assertFalse(body.contains("\"summary\""), body);
+        assertEquals(0, messages.listByConversationId(conversationId).size());
+    }
+
+    @Test
     void streamingFailureEmitsOnlyASafeErrorAndDoesNotRecordASuccessfulExchange() throws JsonProcessingException {
         UUID conversationId = UUID.randomUUID();
         var events = streamEvents(conversationId, "provider-failure");
