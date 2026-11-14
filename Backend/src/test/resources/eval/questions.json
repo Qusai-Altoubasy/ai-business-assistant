@@ -1,0 +1,291 @@
+[
+  {
+    "id": "P01", "category": "policy", "endpoints": ["knowledge", "chat"],
+    "question": "When is a product considered critical?",
+    "expectedTools": ["searchKnowledgeBase"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["INV-3"], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "inventory-policy.md INV-3; calibration set (KnowledgeRetrieverLiveTest)"
+  },
+  {
+    "id": "P02", "category": "policy", "endpoints": ["knowledge"],
+    "question": "How much stock should we reorder for a low-stock product?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["INV-11"], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "inventory-policy.md INV-11; calibration set"
+  },
+  {
+    "id": "P03", "category": "policy", "endpoints": ["knowledge", "chat"],
+    "question": "How many days does a customer have to return an item?",
+    "expectedTools": ["searchKnowledgeBase"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["REF-1"], "anyOfRuleIds": [],
+    "mustMention": ["30"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md REF-1 (30 calendar days after order_date); calibration set"
+  },
+  {
+    "id": "P04", "category": "policy", "endpoints": ["knowledge"],
+    "question": "Is there a restocking fee when a monitor is returned?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["REF-9"], "anyOfRuleIds": [],
+    "mustMention": ["15%"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md REF-9 (15% for an opened Displays item); calibration set"
+  },
+  {
+    "id": "P05", "category": "policy", "endpoints": ["knowledge"],
+    "question": "How long does it take to receive a refund?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["REF-10"], "anyOfRuleIds": [],
+    "mustMention": ["business days"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md REF-10 (no later than 5 business days); calibration set"
+  },
+  {
+    "id": "P06", "category": "policy", "endpoints": ["knowledge"],
+    "question": "When is a customer a key account?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["CUS-2"], "anyOfRuleIds": [],
+    "mustMention": ["500"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "customer-policy.md CUS-2 (orderCount >= 3 and totalSpent >= JOD 500.00); calibration set"
+  },
+  {
+    "id": "P07", "category": "policy", "endpoints": ["knowledge"],
+    "question": "Can reports show a customer's email address?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["CUS-10"], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "customer-policy.md CUS-10; calibration set"
+  },
+  {
+    "id": "P08", "category": "policy", "endpoints": ["knowledge"],
+    "question": "What is our return policy?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": ["REF-*"],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md (any REF rule); 6.6 (KnowledgeAnswerLiveTest)"
+  },
+  {
+    "id": "P09", "category": "policy", "endpoints": ["knowledge"],
+    "question": "Can an opened Headset be returned for a refund?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": ["REF-4", "REF-6", "REF-7"],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md REF-4, REF-6, REF-7 (opened sealed Audio packaging, Headset as the example)"
+  },
+  {
+    "id": "P10", "category": "policy", "endpoints": ["knowledge"],
+    "question": "Are VIP customers given a discount?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": ["CUS-8", "CUS-9"],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "customer-policy.md CUS-9 (no VIP status is defined) and CUS-8 (classes change no price or discount)"
+  },
+  {
+    "id": "P11", "category": "policy", "endpoints": ["knowledge"],
+    "question": "Can an out-of-stock product be backordered?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["INV-12"], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "inventory-policy.md INV-12 (backorders are not accepted)"
+  },
+  {
+    "id": "O01", "category": "out-of-scope", "endpoints": ["knowledge", "chat"],
+    "question": "What is our shipping policy?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": ["INV-", "REF-", "CUS-"],
+    "insufficient": true,
+    "basis": "no knowledge-base file covers shipping; 6.7 (KnowledgeAnswerLiveTest) and calibration set"
+  },
+  {
+    "id": "O02", "category": "out-of-scope", "endpoints": ["knowledge"],
+    "question": "Which payment methods do we accept?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": true,
+    "basis": "no knowledge-base file covers payment methods; calibration set"
+  },
+  {
+    "id": "O03", "category": "out-of-scope", "endpoints": ["knowledge", "chat"],
+    "question": "What is the capital of France?",
+    "expectedTools": [], "anyOfTools": [],
+    "forbiddenTools": ["getLowStockProducts", "getInventorySnapshot", "getProductStock", "getSales",
+      "getCustomerStatistics", "getCurrentDate", "searchKnowledgeBase"],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": ["Paris"],
+    "insufficient": true,
+    "basis": "outside the business domain (business-analysis-gemini-system.txt out-of-scope rules); calibration set"
+  },
+  {
+    "id": "O04", "category": "out-of-scope", "endpoints": ["chat"],
+    "question": "Write a Java method that sorts a list.",
+    "expectedTools": [], "anyOfTools": [],
+    "forbiddenTools": ["getLowStockProducts", "getInventorySnapshot", "getProductStock", "getSales",
+      "getCustomerStatistics", "getCurrentDate", "searchKnowledgeBase"],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": ["Collections.sort"],
+    "insufficient": true,
+    "basis": "programming is out of scope (business-analysis-gemini-system.txt)"
+  },
+  {
+    "id": "I01", "category": "inventory", "endpoints": ["chat"],
+    "question": "Which products are low stock?",
+    "expectedTools": [], "anyOfTools": ["getLowStockProducts", "getInventorySnapshot"], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": ["Laptop Stand", "USB-C Cable", "USB-C Hub"], "mustNotMention": ["Keyboard", "Notebook"],
+    "insufficient": null,
+    "basis": "V2 seed products 1 (12/20), 2 (3/20), 6 (6/10) have stock <= minimum; 3 (50/10) and 10 (100/25) do not"
+  },
+  {
+    "id": "I02", "category": "inventory", "endpoints": ["chat"],
+    "question": "What is the current stock of the Keyboard?",
+    "expectedTools": [], "anyOfTools": ["getProductStock", "getInventorySnapshot"], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": ["50"], "mustNotMention": [],
+    "insufficient": null,
+    "basis": "V2 seed product 3 Keyboard: stock_quantity 50"
+  },
+  {
+    "id": "I03", "category": "inventory", "endpoints": ["chat"],
+    "question": "What are the stock and minimum stock of product 5?",
+    "expectedTools": ["getProductStock"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": ["27-inch Monitor", "8", "5"], "mustNotMention": [],
+    "insufficient": null,
+    "basis": "V2 seed product 5 27-inch Monitor: stock_quantity 8, minimum_stock 5"
+  },
+  {
+    "id": "D01", "category": "data", "endpoints": ["chat"],
+    "question": "What were total sales in February 2026?",
+    "expectedTools": ["getSales"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": ["942"], "mustNotMention": [],
+    "insufficient": null,
+    "basis": "V2 seed orders 5-8 (2026-02-03 to 2026-02-25): 165.00 + 112.00 + 505.00 + 160.00 = 942.00"
+  },
+  {
+    "id": "D02", "category": "data", "endpoints": ["chat"],
+    "question": "How many orders did customer 2 place and how much did they spend?",
+    "expectedTools": ["getCustomerStatistics"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": ["3", "753"], "mustNotMention": ["omar.ellis@example.com"],
+    "insufficient": null,
+    "basis": "V2 seed customer 2 Omar Ellis: orders 2, 7, 12 = 93.00 + 505.00 + 155.00 = 753.00"
+  },
+  {
+    "id": "H01", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Which products currently violate our inventory policy?",
+    "expectedTools": ["getInventorySnapshot", "searchKnowledgeBase"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["INV-8"], "anyOfRuleIds": [],
+    "mustMention": ["Laptop Stand", "USB-C Cable", "USB-C Hub", "Keyboard"],
+    "mustNotMention": ["Wireless Mouse", "27-inch Monitor", "Webcam", "Headset", "Desk Lamp", "Notebook"],
+    "insufficient": false,
+    "basis": "INV-8 with V2 seed: Laptop Stand LOW, USB-C Cable CRITICAL, USB-C Hub LOW, Keyboard OVERSTOCK, the rest HEALTHY (given as a count per the prompt); 7.7 (InventoryPolicyLiveTest)"
+  },
+  {
+    "id": "H02", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Which products need restocking and how many units should we order for each?",
+    "expectedTools": ["searchKnowledgeBase"], "anyOfTools": ["getInventorySnapshot", "getLowStockProducts"],
+    "forbiddenTools": [],
+    "expectedRuleIds": ["INV-11"], "anyOfRuleIds": [],
+    "mustMention": ["Laptop Stand", "28", "USB-C Cable", "37", "USB-C Hub", "14"],
+    "mustNotMention": ["Notebook", "Webcam", "Headset", "Desk Lamp", "Wireless Mouse"],
+    "insufficient": false,
+    "basis": "INV-9, INV-11 (2 x minimum_stock - stock_quantity) with V2 seed: Laptop Stand 40-12=28, USB-C Cable 40-3=37, USB-C Hub 20-6=14"
+  },
+  {
+    "id": "H03", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Is the Keyboard compliant with our inventory policy?",
+    "expectedTools": ["searchKnowledgeBase"], "anyOfTools": ["getInventorySnapshot", "getProductStock"],
+    "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": ["INV-6", "INV-8", "INV-10"],
+    "mustMention": ["OVERSTOCK"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "V2 seed product 3 Keyboard 50 > 4 x 10, OVERSTOCK (INV-6), a violation (INV-8, INV-10)"
+  },
+  {
+    "id": "H04", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Is the Notebook overstocked under our inventory policy?",
+    "expectedTools": ["searchKnowledgeBase"], "anyOfTools": ["getInventorySnapshot", "getProductStock"],
+    "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": ["INV-5", "INV-6"],
+    "mustMention": ["HEALTHY"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "V2 seed product 10 Notebook 100 = 4 x 25, so HEALTHY (INV-5), not OVERSTOCK (INV-6 needs > 4 x minimum_stock)"
+  },
+  {
+    "id": "H05", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Can a customer order 5 USB-C Cables right now?",
+    "expectedTools": ["searchKnowledgeBase"],
+    "anyOfTools": ["getInventorySnapshot", "getProductStock", "getLowStockProducts"], "forbiddenTools": [],
+    "expectedRuleIds": ["INV-13"], "anyOfRuleIds": [],
+    "mustMention": ["3"], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "V2 seed product 2 USB-C Cable stock_quantity 3; INV-13 (an order line must not exceed stock_quantity)"
+  },
+  {
+    "id": "H06", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Is customer 2 a key account?",
+    "expectedTools": ["getCustomerStatistics", "searchKnowledgeBase"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["CUS-2"], "anyOfRuleIds": [],
+    "mustMention": ["753"], "mustNotMention": ["omar.ellis@example.com"],
+    "insufficient": false,
+    "basis": "V2 seed customer 2: 3 orders, 753.00 >= 500.00, so KEY_ACCOUNT (CUS-2); CUS-10 forbids the email"
+  },
+  {
+    "id": "H07", "category": "hybrid", "endpoints": ["chat"],
+    "question": "Is customer 1 a key account?",
+    "expectedTools": ["getCustomerStatistics", "searchKnowledgeBase"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["CUS-2"], "anyOfRuleIds": [],
+    "mustMention": ["483"], "mustNotMention": ["maya.reed@example.com"],
+    "insufficient": false,
+    "basis": "V2 seed customer 1 Maya Reed: orders 1, 4, 9 = 110.00 + 106.00 + 267.00 = 483.00 < 500.00, so not KEY_ACCOUNT (CUS-2)"
+  },
+  {
+    "id": "M01", "category": "missing-data", "endpoints": ["chat"],
+    "question": "What is the current stock of product 42?",
+    "expectedTools": ["getProductStock"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": true,
+    "basis": "V2 seed has products 1-10 only"
+  },
+  {
+    "id": "M02", "category": "missing-data", "endpoints": ["chat"],
+    "question": "Show the statistics for customer 99.",
+    "expectedTools": ["getCustomerStatistics"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": true,
+    "basis": "V2 seed has customers 1-5 only"
+  },
+  {
+    "id": "M03", "category": "missing-data", "endpoints": ["chat"],
+    "question": "What were total sales in December 2025?",
+    "expectedTools": ["getSales"], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": [], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": ["942", "604"],
+    "insufficient": null,
+    "basis": "V2 seed orders start on 2026-01-05; 604.00 and 942.00 are the January and February 2026 totals"
+  },
+  {
+    "id": "M04", "category": "missing-data", "endpoints": ["knowledge"],
+    "question": "How long do refunds take and how long does shipping take?",
+    "expectedTools": [], "anyOfTools": [], "forbiddenTools": [],
+    "expectedRuleIds": ["REF-10"], "anyOfRuleIds": [],
+    "mustMention": [], "mustNotMention": [],
+    "insufficient": false,
+    "basis": "refund-policy.md REF-10 answers the refund part; no file covers shipping"
+  }
+]

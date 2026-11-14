@@ -2,6 +2,7 @@ package com.aibusinessassistant.product;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -10,8 +11,11 @@ import org.junit.jupiter.api.Test;
 
 import com.aibusinessassistant.order.OrderItemRepository;
 import com.aibusinessassistant.product.dto.InventorySnapshotItemDTO;
+import com.aibusinessassistant.product.dto.ProductStockDTO;
 import com.aibusinessassistant.product.tools.InventoryTools;
 
+import dev.langchain4j.internal.Json;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -63,5 +67,23 @@ class InventoryToolsTest {
         products.deleteAll();
 
         assertEquals(List.of(), tools.getInventorySnapshot());
+    }
+
+    @Test
+    @TestTransaction
+    void foundProductIsReturnedAsTheResultObjectAndAsJsonText() {
+        ToolExecutionResult result = tools.getProductStock(5L);
+
+        assertEquals(new ProductStockDTO(5L, "27-inch Monitor", 8, 5), result.result());
+        assertEquals(Json.toJson(result.result()), result.resultText());
+    }
+
+    @Test
+    @TestTransaction
+    void missingProductReturnsTheNotFoundResult() {
+        ToolExecutionResult result = tools.getProductStock(42L);
+
+        assertEquals("No product found with id 42.", result.resultText());
+        assertNull(result.result());
     }
 }

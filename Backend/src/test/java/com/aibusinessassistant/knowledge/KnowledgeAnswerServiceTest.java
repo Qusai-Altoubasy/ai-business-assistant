@@ -1,6 +1,7 @@
 package com.aibusinessassistant.knowledge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import com.aibusinessassistant.knowledge.dto.KnowledgeAnswerDTO;
 import com.aibusinessassistant.knowledge.dto.KnowledgeSourceDTO;
+
+import dev.langchain4j.exception.TimeoutException;
 
 // Fakes replace the retriever and the chat model, so no request reaches Gemini and no database is needed.
 // The fakes are inner classes, so they are never CDI beans.
@@ -69,6 +72,29 @@ class KnowledgeAnswerServiceTest {
         assertEquals("Within 5 business days.", answer.answer());
         assertEquals(List.of(new KnowledgeSourceDTO("refund-policy.md", "Refund processing time", "REF-10")),
                 answer.sources());
+    }
+
+    @Test
+    void anEmbeddingFailureIsRethrownWithoutCallingTheModel() {
+        // The question is embedded before the database is read, so no repository is needed.
+        KnowledgeRetriever retriever = new KnowledgeRetriever(
+                new EmbeddingService(new RecordingEmbeddingModel(EmbeddingService.DIMENSION).failOnCall(1)), null, 5, 0.66);
+        KnowledgeAnswerService service = new KnowledgeAnswerService(retriever,
+                new FakeAiService(new KnowledgeAiAnswer("Within 5 business days.", List.of("REF-10"))));
+
+        assertThrows(IllegalStateException.class, () -> service.answer(QUESTION));
+        assertEquals(List.of(), modelQuestions);
+    }
+
+    @Test
+    void aModelTimeoutIsRethrownWithoutAnAnswer() {
+        KnowledgeAnswerService service = new KnowledgeAnswerService(new FakeRetriever(List.of(REF_10)),
+                (context, question) -> {
+                    throw new TimeoutException("Gemini did not answer in time");
+                });
+
+        assertThrows(TimeoutException.class, () -> service.answer(QUESTION));
+        assertEquals(List.of(QUESTION), retrievedQuestions);
     }
 
     private KnowledgeAnswerService service(List<RetrievedChunk> chunks, KnowledgeAiAnswer modelAnswer) {
