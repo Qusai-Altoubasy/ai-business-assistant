@@ -110,6 +110,8 @@ The system prompt at `Backend/src/main/resources/prompts/business-analysis-syste
 docker compose up -d --build --force-recreate backend
 ```
 
+The knowledge-base files under `Backend/src/main/resources/knowledge-base/` are also packaged into the backend image, so editing them needs the same rebuild and restart; the backend re-indexes them at startup (see [Knowledge Base](../Backend/README.md#knowledge-base)).
+
 `API_BASE_URL` is compiled into the Flutter bundle, so changing it in `.env` requires rebuilding the frontend image.
 
 ## Troubleshooting

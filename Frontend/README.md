@@ -1,6 +1,6 @@
 # AI Business Assistant — Flutter frontend
 
-Desktop-first Flutter client for the backend's two AI chat endpoints. The
+Desktop-first Flutter client for the backend's chat endpoint, `POST /api/chat`. The
 current implementation provides sales, inventory, and customer purchase analysis
 through the existing chat flow.
 The sidebar's Chat Mode section selects Structured Chat or Streaming Chat.
@@ -55,7 +55,7 @@ address reachable from that device instead of `localhost`.
   the composer; Send or Enter submits it through the same chat flow.
 - Enter sends a message; Shift+Enter inserts a newline.
 - Trims messages and sends them with a stable UUID v4 conversation ID and the
-  selected `provider` as JSON to the selected endpoint. Follow-up requests,
+  selected `provider` as JSON to `POST /api/chat`. Follow-up requests,
   retries, and mode switches reuse that ID and provider.
 - The provider is pinned on the first send attempt, including failed requests,
   because the backend can save the provider before generation fails. The menu
@@ -79,8 +79,8 @@ address reachable from that device instead of `localhost`.
 - The sidebar lists example questions, not persisted conversation history.
 - Business data, sales, and inventory analysis are marked available. The backend
   persists conversation history and a bounded AI context, but the frontend has
-  no history list or resume flow. Semantic search, citations, and evaluation
-  remain planned.
+  no history list or resume flow. Policy answers with cited sources and the
+  evaluation suite are described in [Backend/README.md](../Backend/README.md).
 
 The backend is the authority for available data: it can read low-stock products,
 stock for a product ID, recorded revenue/order counts in an inclusive date
@@ -101,7 +101,7 @@ widget in Structured Chat. Streaming Chat shows the generated text and subtle
 tool progress; neither mode implements separate domain filtering.
 
 The frontend sends `{"conversationId":"...","query":"...","provider":"gemini"}`
-or `"provider":"ollama"` to both endpoints. Structured Chat returns
+or `"provider":"ollama"` to `POST /api/chat` in both modes. Structured Chat returns
 `{"summary":"...","insights":["..."],"recommendations":["..."]}`. Missing or
 null lists become empty lists; blank list entries are omitted. Invalid field
 types and blank summaries produce safe inline errors with Retry. Calling it
@@ -161,7 +161,7 @@ flutter build web \
 ```
 
 Tests cover both provider choices and checkmarks, exact request serialization
-for both endpoints, provider pinning during and after requests (including
+for JSON and SSE requests to `POST /api/chat`, provider pinning during and after requests (including
 failures/retries), follow-up messages, and New Chat reset/cancellation. Existing
 structured rendering, streaming, mode, retry, and prompt tests remain in place.
 
