@@ -6,10 +6,8 @@ on:
     paths:
       - "Backend/**"
       - ".github/workflows/backend-ci.yml"
+  # Every pull request runs this check, because branch protection requires it on main.
   pull_request:
-    paths:
-      - "Backend/**"
-      - ".github/workflows/backend-ci.yml"
   workflow_dispatch:
 
 permissions:
