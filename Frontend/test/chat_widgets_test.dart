@@ -180,6 +180,9 @@ void main() {
       expect(find.text('CHAT MODE'), findsOneWidget);
       expect(find.text('ARCHITECTURE MODULES'), findsNothing);
       expect(find.text('Memory · Available'), findsOneWidget);
+      expect(find.text('Semantic search · Available'), findsOneWidget);
+      expect(find.text('Citations · Available'), findsOneWidget);
+      expect(find.textContaining('Planned'), findsNothing);
       await tester.tap(find.text('Streaming Chat'));
       await tester.pump();
       const prompt = 'Which products are currently low in stock?';
