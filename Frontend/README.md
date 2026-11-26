@@ -77,7 +77,8 @@ address reachable from that device instead of `localhost`.
   composer, and preserves the selected mode and provider. The provider menu is
   unlocked for the new conversation.
 - The sidebar lists example questions, not persisted conversation history.
-- Business data, sales, and inventory analysis are marked available. The backend
+- Business data, sales, inventory, semantic search, memory, and citations are
+  marked available. The backend
   persists conversation history and a bounded AI context, but the frontend has
   no history list or resume flow. Policy answers with cited sources and the
   evaluation suite are described in [Backend/README.md](../Backend/README.md).

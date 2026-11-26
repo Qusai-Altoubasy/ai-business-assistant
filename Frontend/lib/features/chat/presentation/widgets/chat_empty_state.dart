@@ -97,7 +97,7 @@ class ChatEmptyState extends StatelessWidget {
             ),
             _Capability(
               icon: Icons.hub_outlined,
-              label: 'Semantic search · Planned',
+              label: 'Semantic search · Available',
             ),
             _Capability(
               icon: Icons.memory_outlined,
@@ -105,7 +105,7 @@ class ChatEmptyState extends StatelessWidget {
             ),
             _Capability(
               icon: Icons.verified_outlined,
-              label: 'Citations · Planned',
+              label: 'Citations · Available',
             ),
           ],
         ),
